@@ -10,6 +10,7 @@
 | price_sensitivity  | float | 0.0 - 1.0 | How much price affects the buying decision                              |
 | complaint_tendency | float | 0.0 - 1.0 | How likely the customer is to complain or open a support ticket         |
 | forgiveness_level  | float | 0.0 - 1.0 | How likely the customer is to forgive the company after a good response |
+| switch_tendency    | float | 0.0 - 1.0 | How quickly the customer switches to a competing brand                  |
 
 ## Customer Possible Actions
 
@@ -21,19 +22,29 @@
 * recommend_company
 * wait_for_more_information
 
+## Customer Tools
+
+* customer_support
+* social_network
+* news_website
+* company_website
+* email
+
 ---
 
 ## 2. Influencer Agent Attributes
 
-| Attribute           | Type    | Range     | Meaning                                                               |
-| ------------------- | ------- | --------- | --------------------------------------------------------------------- |
-| audience_size       | integer | 1,000+    | Number of followers                                                   |
-| influence_level     | float   | 0.0 - 1.0 | How strongly the influencer can affect public opinion                 |
-| credibility         | float   | 0.0 - 1.0 | How much the audience trusts this influencer                          |
-| sensationalism      | float   | 0.0 - 1.0 | How dramatic or emotional the influencer’s content is                 |
-| controversy_seeking | float   | 0.0 - 1.0 | How likely the influencer is to create conflict or attack the company |
-| brand_support       | float   | 0.0 - 1.0 | How positive the influencer is toward HappyTuna before the crisis     |
-| viral_probability   | float   | 0.0 - 1.0 | Chance that the influencer’s post becomes viral                       |
+| Attribute           | Type    | Range                                                | Meaning                                                               |
+| ------------------- | ------- | ---------------------------------------------------- | --------------------------------------------------------------------- |
+| audience_size       | integer | 1,000+                                               | Number of followers                                                   |
+| influence_level     | float   | 0.0 - 1.0                                            | How strongly the influencer can affect public opinion                 |
+| credibility         | float   | 0.0 - 1.0                                            | How much the audience trusts this influencer                          |
+| sensationalism      | float   | 0.0 - 1.0                                            | How dramatic or emotional the influencer's content is                 |
+| controversy_seeking | float   | 0.0 - 1.0                                            | How likely the influencer is to create conflict or attack the company |
+| brand_support       | float   | 0.0 - 1.0                                            | How positive the influencer is toward HappyTuna before the crisis     |
+| viral_probability   | float   | 0.0 - 1.0                                            | Chance that the influencer's post becomes viral                       |
+| content_style       | string  | analytical \| emotional \| humorous \| investigative | Dominant communication style that shapes tone and framing             |
+| platform            | string  | instagram \| tiktok \| twitter \| youtube            | Primary social platform (affects format and reach)                    |
 
 ## Influencer Possible Actions
 
@@ -44,3 +55,9 @@
 * push_narrative
 * start_campaign
 * wait_before_posting
+
+## Influencer Tools
+
+* social_network
+* news_website
+* company_website
