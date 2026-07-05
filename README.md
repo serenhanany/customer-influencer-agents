@@ -1,3 +1,4 @@
+# How to run social network app (more info in social-network directory)
 To use this project as a Docker container, first make sure you make and fill .env file (copy .env.example) then run these 2 commands inside social-network directory:
 ```
 docker build -t social-network-app .    
