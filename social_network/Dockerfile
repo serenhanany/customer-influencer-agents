@@ -39,16 +39,16 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/prisma ./prisma
+# src is needed at runtime only for seeding: prisma/seed.ts is run via tsx (not precompiled)
+# and imports from ../src/config and ../src/utils/text.
+COPY --from=builder /app/src ./src
+
+COPY docker-entrypoint.sh ./
+RUN chmod +x ./docker-entrypoint.sh
 
 # Open port 3000
 EXPOSE 3000
 
-# Start the compiled JavaScript application
-CMD ["npm", "start"]
-
-# Run migrations, conditionally seed, and start the app
-# CMD npx prisma migrate deploy && \
-#     if [ "$SEED_DB" = "true" ]; \
-#     then npx prisma db seed; \
-#     else echo "Skipping seed"; fi \
-#     && npm start
+# Runs migrations, seeds the database only when SEED_DB=true, then starts the app.
+# Empty/unseeded by default: docker run -e SEED_DB=true <image> to seed.
+CMD ["./docker-entrypoint.sh"]
