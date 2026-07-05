@@ -64,4 +64,5 @@ docker run --env-file .env -e SEED_DB=true -p 3005:3000 -d social-network-app
 ```
 
 You can check the Webapp at http://localhost:3005/app/
-And if you want to start with an empty database, without the seed data. Simply removr the "-e SEED_DB=true" alltogether.
+
+And if you want to start with an empty database, without the seed data. Simply remove the "-e SEED_DB=true" alltogether.
