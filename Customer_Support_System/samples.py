@@ -1,12 +1,24 @@
 """
-Smoke-test for in-memory store, sentiment scorer, and auto-logging.
+Smoke-test for the sentiment scorer and activity logging.
+Uses its own throwaway database file so repeated runs never
+pollute or depend on the real customer_support.db.
+
 Run directly:  python samples.py
 """
-import storage
-from models import TicketCreate, IssueType, TicketPriority
+import os
+
+# Point storage at a dedicated test DB *before* importing storage,
+# so init_db() creates tables there instead of the real database.
+TEST_DB = "samples_test.db"
+if os.path.exists(TEST_DB):
+    os.remove(TEST_DB)
+os.environ["CS_DB_PATH"] = TEST_DB
+
+import storage  # noqa: E402  (must come after setting CS_DB_PATH)
+from models import TicketCreate, IssueType, TicketPriority  # noqa: E402
 
 SAMPLES = [
-    # User-provided test case — all three angry keywords present
+    # All three angry keywords present
     TicketCreate(
         customer_id="CUST-1001",
         issue_type=IssueType.safety_concern,
@@ -18,7 +30,7 @@ SAMPLES = [
         linked_product_batch="4471",
         priority=TicketPriority.high,
     ),
-    # Caps + punctuation — tests .lower() normalisation
+    # Caps + punctuation
     TicketCreate(
         customer_id="CUST-1002",
         issue_type=IssueType.safety_concern,
@@ -30,7 +42,7 @@ SAMPLES = [
         linked_product_batch="4471",
         priority=TicketPriority.critical,
     ),
-    # Positive — multi-word phrase "thank you" + "great"
+    # Positive — multi-word phrase + single word
     TicketCreate(
         customer_id="CUST-1003",
         issue_type=IssueType.general,
@@ -40,7 +52,7 @@ SAMPLES = [
             "and the replacement arrived fast."
         ),
     ),
-    # Neutral — no keyword hits; plain factual complaint
+    # Neutral — plain factual complaint
     TicketCreate(
         customer_id="CUST-1004",
         issue_type=IssueType.delivery,
@@ -87,9 +99,9 @@ SAMPLES = [
             "Just wanted to flag it."
         ),
     ),
-    # keyword_v1 limit: negation > 2 tokens away is NOT caught.
+    # keyword_v1 limit: negation more than 2 tokens away is NOT caught.
     # "don't" is 3 tokens before "disgusting", so the scorer still fires angry.
-    # Documented expected behaviour of the 2-token window.
+    # This is the documented boundary of the 2-token negation window.
     TicketCreate(
         customer_id="CUST-1009",
         issue_type=IssueType.quality,
@@ -100,17 +112,21 @@ SAMPLES = [
 
 EXPECTED = [
     "angry", "angry", "positive", "neutral", "neutral",
-    "frustrated", "frustrated", "neutral", "angry",  # CUST-1009: negation outside 2-token window
+    "frustrated", "frustrated", "neutral", "angry",
 ]
 
 
 def main() -> None:
+    print(f"Using throwaway test database: {TEST_DB}\n")
     print(f"{'ID':<12} {'Expected':<10} {'Got':<10} {'Match':<6}  Description snippet")
     print("-" * 80)
     all_pass = True
+    first_ticket_id = None
     for data, expected in zip(SAMPLES, EXPECTED):
         ticket = storage.create_ticket(data)
-        got = ticket.sentiment.value if ticket.sentiment else "none"
+        if first_ticket_id is None:
+            first_ticket_id = ticket.ticket_id
+        got = ticket.sentiment.value if hasattr(ticket.sentiment, "value") else ticket.sentiment
         match = got == expected
         if not match:
             all_pass = False
@@ -119,16 +135,17 @@ def main() -> None:
         print(f"{ticket.ticket_id:<12} {expected:<10} {got:<10} {flag:<6}  {snippet!r}")
 
     print()
-
-    # Show full activity log for the first ticket to confirm both log entries appear
-    first_id = f"TCK-{1:05d}"
-    log = storage.get_activity_log(first_id)
-    print(f"Activity log for {first_id} ({len(log)} entries):")
+    log = storage.get_activity_log(first_ticket_id)
+    print(f"Activity log for {first_ticket_id} ({len(log)} entries):")
     for entry in log:
         print(f"  [{entry.log_id}] {entry.activity_type:<18} actor={entry.actor}  details={entry.details}")
 
     print()
     print("All samples passed." if all_pass else "SOME SAMPLES FAILED -- see FAIL rows above.")
+
+    # Clean up the throwaway DB so re-runs always start fresh
+    if os.path.exists(TEST_DB):
+        os.remove(TEST_DB)
 
 
 if __name__ == "__main__":

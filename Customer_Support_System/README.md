@@ -1,15 +1,73 @@
-# Customer Support API
+# Customer Support System
 
-FastAPI service for the HappyTuna crisis-simulation project (Team 3).
+FastAPI backend + React monitoring dashboard for the HappyTuna crisis-simulation project (Team 3).
 
-## Running the server
+---
+
+## Running with Docker (recommended)
+
+This service is part of the project-wide `docker-compose.yml` at the repo root. From the repo root:
 
 ```bash
-pip install fastapi uvicorn
-uvicorn main:app --reload
+docker compose up --build
 ```
 
-Interactive docs are at `http://localhost:8000/docs`.
+This builds and starts every team's service at once, including this one. See the root `PROJECT_README.md` for the full picture.
+
+To rebuild just this service after changing code, without rebuilding everything else:
+
+```bash
+docker compose up --build customer-support-api
+docker compose up --build customer-support-dashboard
+```
+
+### Why there are two Dockerfiles
+
+This service is actually two separate containers:
+
+| | Location | What it does |
+|---|---|---|
+| **API** | `Customer_Support_System/Dockerfile` | Python container running the FastAPI backend (`main.py`) — serves the ticket endpoints |
+| **Dashboard** | `Customer_Support_System/cs-monitor/Dockerfile` | Node container that builds the React dashboard into static files, then serves them |
+
+They're separate because they need completely different environments (Python vs. Node) — one Dockerfile can't sensibly do both. The dashboard's container runs `npm run build` once, then serves the compiled static site; it isn't running a dev server inside Docker.
+
+### Ports
+
+| Service | Port | Why |
+|---|---|---|
+| `customer-support-api` | **8003** (external) → 8001 (inside container) | 8001 was already taken by `customer-agent` in the shared `docker-compose.yml`, so this service uses 8003 externally to avoid the collision |
+| `customer-support-dashboard` | **5173** | Vite's default dev port, kept the same in production for consistency |
+
+The dashboard's `BASE_URL` (in `cs-monitor/src/Dashboard.jsx`) must always point at **8003** — if you ever change the API's port mapping in `docker-compose.yml`, update `BASE_URL` to match, then rebuild the dashboard container.
+
+---
+
+## Running locally without Docker
+
+Useful for quick iteration without rebuilding containers.
+
+**Terminal 1 — API:**
+```bash
+cd Customer_Support_System
+pip install -r requirements.txt
+uvicorn main:app --port 8003 --reload
+```
+
+**Terminal 2 — Dashboard:**
+```bash
+cd Customer_Support_System/cs-monitor
+npm install
+npm run dev
+```
+
+Open `http://localhost:5173` for the dashboard, `http://localhost:8003/docs` for Swagger.
+
+Keep using **8003** locally too (not 8001) — that way the code doesn't need different config for local vs. Docker.
+
+### CORS
+
+The API allows requests from `http://localhost:5173` via `CORSMiddleware` in `main.py`. This only matters for **browser-based calls** (the dashboard) — other teams' agents calling this API from backend code aren't affected by CORS at all.
 
 ---
 
@@ -18,7 +76,7 @@ Interactive docs are at `http://localhost:8000/docs`.
 ### 1. Create a ticket
 
 ```bash
-curl -s -X POST http://localhost:8000/tickets \
+curl -s -X POST http://localhost:8003/tickets \
   -H "Content-Type: application/json" \
   -d '{
     "customer_id": "CUST-1190",
@@ -44,8 +102,8 @@ Example response:
   "subject": "Metal fragment in canned tuna",
   "description": "Found a sharp piece of metal in batch #4471.",
   "linked_product_batch": "4471",
-  "sentiment": null,
-  "sentiment_method": null,
+  "sentiment": "angry",
+  "sentiment_method": "keyword_v1",
   "assignee": null,
   "reply_message": null,
   "schema_version": 1
@@ -57,7 +115,7 @@ Example response:
 ### 2. Patch the ticket's status (and set the actor)
 
 ```bash
-curl -s -X PATCH http://localhost:8000/tickets/TCK-00001 \
+curl -s -X PATCH http://localhost:8003/tickets/TCK-00001 \
   -H "Content-Type: application/json" \
   -d '{
     "status": "in_progress",
@@ -73,7 +131,7 @@ activity-log entry. The caller never touches the log directly.
 ### 3. Fetch the activity log — confirm the auto-log entry appeared
 
 ```bash
-curl -s http://localhost:8000/tickets/TCK-00001/activity | python -m json.tool
+curl -s http://localhost:8003/tickets/TCK-00001/activity | python -m json.tool
 ```
 
 Example response (two entries: creation + status change):
@@ -111,14 +169,14 @@ Example response (two entries: creation + status change):
 ### 4. Filter tickets by issue_type=safety_concern
 
 ```bash
-curl -s "http://localhost:8000/tickets?issue_type=safety_concern" | python -m json.tool
+curl -s "http://localhost:8003/tickets?issue_type=safety_concern" | python -m json.tool
 ```
 
 Combine filters freely — all query params are optional:
 
 ```bash
 # Safety tickets that are still open, for a specific batch
-curl -s "http://localhost:8000/tickets?issue_type=safety_concern&status=open&linked_product_batch=4471"
+curl -s "http://localhost:8003/tickets?issue_type=safety_concern&status=open&linked_product_batch=4471"
 ```
 
 ---
@@ -144,10 +202,31 @@ not generate its own log entry.
 ## Enum values
 
 | Field         | Accepted values                                            |
-|---------------|------------------------------------------------------------|
+|---------------|--------------------------------------------------------------|
 | `status`      | `open`, `in_progress`, `escalated`, `resolved`, `closed`  |
 | `priority`    | `low`, `medium`, `high`, `critical`                        |
 | `issue_type`  | `quality`, `delivery`, `billing`, `general`, `safety_concern` |
 | `sentiment`   | `angry`, `frustrated`, `neutral`, `positive`               |
 
 Invalid values return `422 Unprocessable Entity` automatically.
+
+## Sentiment scoring
+
+Sentiment is auto-computed at ticket creation by `score_sentiment()` in
+`storage.py` (`keyword_v1`): keyword/phrase matching for angry, frustrated,
+and positive, with basic negation handling (skips a match if a negation
+word appears within 2 tokens before it). See `samples.py` for test cases,
+including the documented 2-token negation-window limit.
+
+**Planned upgrade:** once the Customer agent is wired to an LLM, that same
+call can also return a sentiment label (`llm_v1`), with the keyword scorer
+kept as a fallback.
+
+## Running the test suite
+
+```bash
+python samples.py
+```
+
+Runs 9 sample tickets through the sentiment scorer and prints pass/fail
+against expected results, plus the activity log for the first ticket.

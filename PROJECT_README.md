@@ -91,16 +91,16 @@ Use deterministic rules for safety-critical triggers. Reserve LLM-based routing 
 
 ## 6. Schemas built so far
 
-### Customer Support ticket (see `Customer_Support_Schema.md`)
-- Core fields: `ticket_id`, `customer_id`, `status`, `priority`, `issue_type` (includes `safety_concern` as a distinct, escalation-worthy category), `description`, `linked_product_batch` (nullable — ties a complaint to a specific batch for recall/contamination tracing), `sentiment` (self-reported by the agent for now, swappable later).
+### Customer Support ticket (see `Customer_Support_System/Customer_Support_Schema.md`)
+- Core fields: `ticket_id`, `customer_id`, `status`, `priority`, `issue_type` (includes `safety_concern` as a distinct, escalation-worthy category), `description`, `linked_product_batch` (nullable — ties a complaint to a specific batch for recall/contamination tracing), `sentiment` (auto-scored via keyword matching, `sentiment_method` tags which scorer produced it, swappable later for an LLM-based one).
 - **Ticket activity log:** a separate, append-only, generic log (`entity_type` + `entity_id` + `activity_type`) that records every change to a ticket. Deliberately generic so Social Network posts or other entities can log into the same table later without a schema change.
 - Both the ticket and the log carry a `schema_version` field so future changes don't break old records.
+- **Status: built and running.** API (5 endpoints), sentiment scorer, test suite, and a monitoring dashboard are all complete — see `Customer_Support_System/README.md` for how to run it.
 
 ### Not yet designed
 - Social Network post/comment schema
 - Event Generator's event schema (the crisis-trigger events — distinct from the ticket activity log above)
-- Agent persona prompt templates
-- API endpoint signatures for both systems
+- Agent persona prompt templates (draft personas exist in `docs/`, not yet wired to an LLM)
 
 ---
 
@@ -129,7 +129,45 @@ Work is split by **task type, not fixed lanes** — everyone touches both system
 
 ---
 
-## 9. Open items
+## 9. Running the whole project
+
+Everything runs together with Docker Compose — one command starts every team's service.
+
+### One-time setup
+1. Install Docker Desktop if you don't have it.
+2. Create a `.env` file at the repo root (copy `.env.example` if one exists). Empty is fine if you're not testing agents that need real API keys yet.
+
+### Run everything
+```bash
+docker compose up --build
+```
+
+### What's running and where
+
+| Service | What it is | URL |
+|---|---|---|
+| `customer-agent` | Customer agent (placeholder — not yet wired to an LLM) | — |
+| `influencer-agent` | Influencer agent (placeholder — not yet wired to an LLM) | — |
+| `customer-support-api` | Customer Support backend (FastAPI) | http://localhost:8003 (docs at `/docs`) |
+| `customer-support-dashboard` | Customer Support monitoring UI | http://localhost:5173 |
+
+Only rebuild the service you changed, instead of everything:
+```bash
+docker compose up --build customer-support-api
+docker compose up --build customer-support-dashboard
+```
+
+If nothing changed since your last build, drop `--build` for a faster start:
+```bash
+docker compose up
+```
+
+See `Customer_Support_System/README.md` for details specific to that service (why there are two Dockerfiles, port choices, local-dev instructions without Docker).
+
+---
+
+## 10. Open items
 
 - Confirm with Team 2 what their internal escalation/audit activity looks like, so naming (`actor` values, activity types) lines up across teams.
 - Confirm with Team 4 whether their event engine expects a specific envelope format, so our event generator and activity log can feed into it without duplication.
+- `customer-agent` / `influencer-agent` are currently placeholders (`print(...)` then exit) — need real LLM wiring before they do anything in the simulation.

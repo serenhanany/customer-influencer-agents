@@ -1,10 +1,18 @@
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from typing import Optional
 
 from models import TicketCreate, TicketPatch, TicketStatus, IssueType
 import storage
 
 app = FastAPI(title="Customer Support API", version="1.0.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.post("/tickets", status_code=201)
