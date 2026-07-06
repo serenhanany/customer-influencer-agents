@@ -33,5 +33,18 @@ services:
     depends_on:
       - customer-support-api
 
+  social-network:
+    build: ./social_network
+    container_name: social-network
+    ports:
+      - "3005:3000"
+    env_file:
+      - ./social_network/.env
+    environment:
+      - DATABASE_URL=file:/app/data/dev.db
+    volumes:
+      - social_network_data:/app/data
+
 volumes:
   customer_support_data:
+  social_network_data:
