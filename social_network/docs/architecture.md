@@ -1,6 +1,6 @@
 # Architecture
 
-**Last updated:** 2026-06-24 · Related: [`PLAN.md`](./PLAN.md) · [`analytics-methodology.md`](./analytics-methodology.md) · [`phase6-narrative-shapers.md`](./phase6-narrative-shapers.md) · [`../CLAUDE.md`](../CLAUDE.md)
+**Last updated:** 2026-07-05 · Related: [`PLAN.md`](./PLAN.md) · [`analytics-methodology.md`](./analytics-methodology.md) · [`phase6-narrative-shapers.md`](./phase6-narrative-shapers.md) · [`../CLAUDE.md`](../CLAUDE.md)
 
 ## 1. Overview & responsibilities
 
@@ -138,6 +138,7 @@ To set the real company name (e.g. `HappyTuna`): set `COMPANY_NAME` in `.env` (a
 | Testing | Jest + Supertest, coverage > 80% |
 | API docs | OpenAPI 3.0 spec (`public/openapi.json`) + `swagger-ui-express` (interactive UI at `/openapi`) |
 | Frontend | React + Vite + TypeScript; Recharts for charts |
+| Containerization | Multi-stage `Dockerfile` (build → prune to prod deps → run); `docker-entrypoint.sh` runs migrations and an opt-in seed |
 
 ## 8. File structure (current)
 
@@ -219,6 +220,8 @@ Project/
 │
 ├── docs/                             # PLAN, TASKS, architecture, analytics-methodology, design,
 │                                     #   phase6-narrative-shapers, README (this folder)
+├── Dockerfile                        # multi-stage build (builder → pruned runner image)
+├── docker-entrypoint.sh              # runs `prisma migrate deploy`, then seeds iff SEED_DB=true
 └── CLAUDE.md                         # coding standards & house rules (authoritative)
 ```
 

@@ -19,6 +19,9 @@ public/app/
 *.db-wal
 *.db-shm
 
+# Bind-mounted persistent data for `docker run -v ./data:/app/data` (see README's Docker section)
+/data/
+
 # Test & coverage output
 coverage/
 

@@ -32,6 +32,9 @@ RUN npm prune --production
 FROM node:22-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
+# Default sqlite path (relative to prisma/schema.prisma -> /app/prisma/dev.db); ephemeral unless
+# overridden with an absolute path into a bind-mounted volume (see README's Docker section).
+ENV DATABASE_URL=file:./dev.db
 
 # Copy only what is strictly necessary to run the app from Stage 1
 COPY package*.json ./

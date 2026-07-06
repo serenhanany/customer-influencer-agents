@@ -3,7 +3,7 @@
 **Maintained throughout the project.** Update status as work proceeds.
 See [`PLAN.md`](./PLAN.md) for the why and the design.
 
-**Last updated:** 2026-06-24.
+**Last updated:** 2026-07-05.
 
 Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `[!]` blocked
 
@@ -105,6 +105,19 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `[!]` blocked
 > Verified live: reseeded the arc, ran analysis (16 posts, lexicon), screenshotted `/app/dashboard` —
 > Opinion Index −10.1 (weighted −9.3), Crisis Meter 100, a detected spike (z=3.32), #brightwaymercury
 > shaper-led by `maria_chen` (−45.8), cohort gap shapers −12.4 vs public −20.
+
+## Phase 7 — Containerization  ✅ done (2026-07-05)
+- [x] Multi-stage `Dockerfile` (builder compiles API + client; runner is pruned to prod deps)
+- [x] `docker-entrypoint.sh` — runs `prisma migrate deploy` on start, then seeds only if
+      `SEED_DB=true` is passed to `docker run`; **empty/unseeded by default**
+- [x] Replaced `ts-node`/`ts-node-dev` with `tsx` everywhere (`dev`, `seed` scripts) — actively
+      maintained, no separate `typescript` install needed at runtime; `tsx` and `prisma` (CLI)
+      moved to real `dependencies` so they survive `npm prune --production` in the runner image
+- [x] `.dockerignore` fixed to exclude `prisma/*.db` (previously only `test.db` was excluded —
+      `dev.db` could have been baked into the image with seeded data already in it)
+- [x] Verified live: built the image, ran it unseeded (`GET /api/users` → empty) and seeded
+      (`-e SEED_DB=true` → demo scenario loaded), migrations applied fresh both times
+- [x] README quick start + `architecture.md` (tech stack, file structure) updated
 
 ## Continuous
 - [ ] Keep `PLAN.md`, `TASKS.md`, and the rest of `docs/` in sync with reality
