@@ -250,9 +250,26 @@ of truth, kept in sync with the code. It is served two ways:
 - **`/openapi.json`** — the raw spec (for Postman / codegen / agents).
 - **`/openapi`** — an interactive **Swagger UI** (`swagger-ui-express`) for humans to browse and try.
 
-**Agent / MCP readiness.** Every operation carries an `operationId` (e.g. `createPost`, `getOverview`),
-and request/response payloads are typed in `components/schemas`. This makes the spec suitable not just
-for client codegen but for **driving agent tool-use** (function-calling frameworks can ingest the spec
-directly) and for **generating an MCP server** later: each operation maps to a tool —
-`operationId` → tool name, `summary`/`description` → tool description, parameters + request body →
-the tool's input schema. Swagger UI itself is human-facing only; agents consume `/openapi.json`.
+**Agent / MCP readiness.** Beyond the raw spec (every operation carries an `operationId` and typed
+`components/schemas`, so function-calling frameworks can ingest `/openapi.json` directly), the platform
+ships **two MCP (Model Context Protocol) servers** for AI agents. They are mounted on the same Express
+app as **Streamable-HTTP endpoints** — no separate process or port:
+
+- **`/mcp/social`** — participation tools (log in, post, comment, like/repost, follow, browse
+  feeds/users/search/hashtags).
+- **`/mcp/analytics`** — research tools over the analytics layer (overview, sentiment timeline,
+  aspects, trends, influencers, spikes, cohorts, narratives, top posts, plus analyze/config controls).
+
+Design (code in `src/mcp/`):
+- **Transport.** A shared `createMcpHttpRouter` (`src/mcp/httpTransport.ts`) manages sessions with the
+  SDK's `StreamableHTTPServerTransport`, building a **fresh MCP server per session** so many agents can
+  share an endpoint without their state crossing. `mountMcp` (`src/mcp/mount.ts`) wires both endpoints
+  into `createApp()`.
+- **Tools wrap the service layer in-process** — no self-HTTP. All business logic, validation, and
+  `AppError` handling are reused; a service error is translated to a clean MCP tool error by
+  `runTool` (`src/mcp/toolHelpers.ts`).
+- **Identity** on `/mcp/social` mirrors the app's name-only auth (token == user id): the `login` tool
+  binds the session's user id, and write tools act as that user. `/mcp/analytics` is unauthenticated,
+  matching the REST analytics endpoints.
+
+Swagger UI itself is human-facing only; agents consume `/openapi.json` or the MCP endpoints.

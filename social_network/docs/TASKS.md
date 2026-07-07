@@ -98,8 +98,8 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `[!]` blocked
       `HappyTuna`; tests pin `COMPANY_NAME=BrightWay` in `test-setup.ts`. openapi → v2.3.0
 - [x] **Interactive API docs + agent-ready spec** — `operationId` on all 34 operations + typed
       `components/schemas` for analytics responses; **Swagger UI** at `/openapi` (`swagger-ui-express`),
-      raw spec at `/openapi.json`; title → "BrightTweets API". openapi → v2.4.0. Lays the groundwork
-      for generating an MCP server / agent tools later.
+      raw spec at `/openapi.json`; title → "BrightTweets API". openapi → v2.4.0. Laid the groundwork
+      for the MCP servers (Phase 8 below).
 - [~] Polarization, follow-graph communities, conversation-depth widgets — still deferred (catalog items)
 
 > Verified live: reseeded the arc, ran analysis (16 posts, lexicon), screenshotted `/app/dashboard` —
@@ -118,6 +118,23 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `[!]` blocked
 - [x] Verified live: built the image, ran it unseeded (`GET /api/users` → empty) and seeded
       (`-e SEED_DB=true` → demo scenario loaded), migrations applied fresh both times
 - [x] README quick start + `architecture.md` (tech stack, file structure) updated
+
+## Phase 8 — MCP servers for AI agents  ✅ done (2026-07-06)
+- [x] Two **MCP (Model Context Protocol)** servers mounted on the existing Express app as
+      Streamable-HTTP endpoints (no extra process/port): **`/mcp/social`** (participation) and
+      **`/mcp/analytics`** (research). Code in `src/mcp/`; deps `@modelcontextprotocol/sdk` + `zod`
+- [x] Shared session-managed transport (`httpTransport.ts`) builds a **fresh MCP server per session**
+      so many agents share an endpoint safely; `mount.ts` wires both into `createApp()`
+- [x] Tools **wrap the service layer in-process** (no self-HTTP) via `runTool` (`toolHelpers.ts`),
+      reusing all validation and translating `AppError` → clean MCP tool errors
+- [x] Identity on `/mcp/social` mirrors name-only auth: `login` binds the session's user id; write
+      tools act as that user (no per-call token). `/mcp/analytics` is unauthenticated
+- [x] Tests: in-memory client suites for both servers + a live Streamable-HTTP suite
+      (`src/mcp/__tests__/`); full suite 133 passing / 23 suites, coverage > 80% gate held
+- [x] Docs: README "MCP servers" section, `architecture.md` §10 rewritten from "planned" to
+      "delivered", `docs/README.md` index entry
+- [x] `tsconfig.json`: added a `paths` map for `@modelcontextprotocol/sdk/*` so `tsc` resolves the
+      SDK's `exports`-only subpaths (classic `node` resolution ignores `exports`); no emit change
 
 ## Continuous
 - [ ] Keep `PLAN.md`, `TASKS.md`, and the rest of `docs/` in sync with reality

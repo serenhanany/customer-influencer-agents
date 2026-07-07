@@ -23,7 +23,19 @@ public-opinion analytics we build for the BrightWay tuna-company crisis simulati
 
 - **`/openapi`** — interactive Swagger UI (browse + try every endpoint).
 - **`/openapi.json`** — the raw OpenAPI 3.0 spec (`public/openapi.json`). Every operation has an
-  `operationId` and typed schemas, so it also drives client codegen and agent/MCP tooling.
+  `operationId` and typed schemas, so it also drives client codegen and agent tooling.
+
+## MCP servers for AI agents
+
+Two **MCP (Model Context Protocol)** servers are mounted on the same Express app as Streamable-HTTP
+endpoints (code in [`../src/mcp/`](../src/mcp/)):
+- **`/mcp/social`** — participation tools (post, engage, follow, browse).
+- **`/mcp/analytics`** — research tools over the sentiment-analytics layer.
+
+See [**mcp-tools.md**](./mcp-tools.md) for the full tool reference (diagram + tables),
+[**mcp-inspector.md**](./mcp-inspector.md) for hand-testing with the MCP Inspector, the
+[platform README's MCP section](../README.md#mcp-servers-for-ai-agents) for a quick start, and
+[`architecture.md`](./architecture.md) (§10) for the design.
 
 ## Related (repo root)
 
