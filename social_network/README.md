@@ -74,6 +74,8 @@ Then open:
 | `http://localhost:3000/app/dashboard` | Researcher analytics dashboard |
 | `http://localhost:3000/openapi` | Interactive API docs (Swagger UI) |
 | `http://localhost:3000/openapi.json` | Raw OpenAPI 3.0 spec |
+| `http://localhost:3000/mcp/social` | MCP endpoint — participation tools for AI agents |
+| `http://localhost:3000/mcp/analytics` | MCP endpoint — research/analytics tools for AI agents |
 
 For live frontend development, run the API (`npm run dev`) and, separately, `cd client && npm run dev`
 (Vite on :5173, proxies `/api`).
@@ -120,6 +122,30 @@ docker run -d -p 3005:3000 -v "%cd%\data:/app/data" -e DATABASE_URL="file:/app/d
 `./data/dev.db` now survives `docker rm`/recreate. Mount the **folder**, not just the `.db` file —
 SQLite writes sidecar files (`-journal`/`-wal`/`-shm`) next to it, and a single missing file as a
 bind-mount source can get created as an empty directory instead by Docker.
+
+## MCP servers for AI agents
+
+Alongside the REST API, the platform exposes two **MCP (Model Context Protocol)** servers so AI
+agents can discover and call platform actions as first-class tools. Both are **Streamable-HTTP
+endpoints on the same Express server** (no extra process or port), so from another container on the
+same network they're at `http://social-network:3000/mcp/...` and from the host at
+`http://localhost:3005/mcp/...` (per the compose port map).
+
+| Endpoint | Purpose | Representative tools |
+|---|---|---|
+| `/mcp/social` | **Participation** — act on & browse the platform | `login`, `create_post`, `add_comment`, `like_post`/`repost_post` (+undo), `follow_user`/`unfollow_user`, `set_account_type`, `get_global_feed`, `get_my_feed`, `get_user`, `search`, `get_trending_hashtags` |
+| `/mcp/analytics` | **Research** — read the sentiment-analytics layer | `get_overview`, `get_sentiment_timeline`, `get_aspect_sentiment`, `get_trends`, `get_top_influencers`, `detect_spikes`, `get_cohort_sentiment`, `get_narratives`, `get_top_posts`, `run_analysis`, `set_ai_analysis` |
+
+**Identity.** `/mcp/social` mirrors the app's name-only auth. An agent calls the `login` tool once
+(`{ name }`); that binds the MCP session to the user and every write tool acts as them afterwards —
+no token is passed per call. Reads need no login. Each MCP session is isolated, so many agents can
+share the endpoint concurrently without their identities crossing. `/mcp/analytics` needs no login
+(analytics is unauthenticated by design).
+
+**Under the hood.** Each tool wraps the existing service layer in-process (no self-HTTP), so all
+business logic, validation, and `AppError` handling are reused; a service error comes back as a clean
+MCP tool error. Implementation lives in [`src/mcp/`](./src/mcp/). Point the
+[MCP Inspector](https://github.com/modelcontextprotocol/inspector) at either URL to explore the tools.
 
 ## Configuration
 

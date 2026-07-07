@@ -11,6 +11,7 @@ import hashtagsRouter from './routes/hashtags';
 import searchRouter from './routes/search';
 import analyticsRouter from './routes/analytics';
 import { errorHandler } from './middleware/errorHandler';
+import { mountMcp } from './mcp/mount';
 import { config } from './config';
 
 /**
@@ -41,6 +42,9 @@ export function createApp(): express.Application {
   app.use('/api/hashtags', hashtagsRouter);
   app.use('/api/search', searchRouter);
   app.use('/api/analytics', analyticsRouter);
+
+  // MCP servers for AI agents: /mcp/social (participation) and /mcp/analytics (research).
+  mountMcp(app);
 
   // SPA fallback: serve the built React client (public/app) for client-side routes under /app.
   app.get('/app/*', (_req, res, next) => {
