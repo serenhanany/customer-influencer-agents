@@ -5,8 +5,6 @@ public-opinion analytics we build for the BrightWay tuna-company crisis simulati
 
 ## Index
 
-- [**PLAN.md**](./PLAN.md) — plan of record: scope, key decisions, data model, API, phasing.
-- [**TASKS.md**](./TASKS.md) — execution checklist, maintained throughout the project.
 - [**architecture.md**](./architecture.md) — system components, boundaries (what we own vs the
   bot/event team), data model, request flows, auth model, tech stack, directory layout.
 - [**analytics-methodology.md**](./analytics-methodology.md) — how every metric is computed: the
@@ -15,9 +13,6 @@ public-opinion analytics we build for the BrightWay tuna-company crisis simulati
   the company-keyword and tuna-aspect lexicons.
 - [**design.md**](./design.md) — the BrightTweets design system: palette, type, 3-column layout,
   the "waterline" signature, and account-type identity styling.
-- [**phase6-narrative-shapers.md**](./phase6-narrative-shapers.md) — what was decided and built for
-  the influencer/journalist "narrative shaper" analytics (weighted index, cohort split, narrative
-  provenance), with the demo crisis arc and verification.
 
 ## Live API docs
 
@@ -48,4 +43,3 @@ These docs are **living artifacts**, not a one-time write-up:
 
 - Changing a component or the data model → update [`architecture.md`](./architecture.md).
 - Adding or changing a metric → update [`analytics-methodology.md`](./analytics-methodology.md).
-- Changing scope, decisions, or phases → update [`PLAN.md`](./PLAN.md) and [`TASKS.md`](./TASKS.md).

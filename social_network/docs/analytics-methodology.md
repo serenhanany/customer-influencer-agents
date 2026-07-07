@@ -4,7 +4,7 @@ How we interpret social activity to research public opinion about **BrightWay**.
 "special methodology" of the project: every metric below has a defined input, formula, and
 intent so it can be implemented and audited.
 
-**Last updated:** 2026-06-24 · Related: [`architecture.md`](./architecture.md) · [`PLAN.md`](./PLAN.md) · [`phase6-narrative-shapers.md`](./phase6-narrative-shapers.md)
+**Last updated:** 2026-06-24 · Related: [`architecture.md`](./architecture.md)
 
 ---
 
@@ -136,8 +136,7 @@ High tails + low middle ⇒ a polarized debate; mass in the middle ⇒ consensus
 **C4. Communities** — connected components / clustering on the follow graph (echo chambers).
 Phase ≥ 6; v1 may approximate via shared-follow overlap.
 
-**C5. Narrative-shaper analytics (Phase 6 — implemented).** Full write-up:
-[`phase6-narrative-shapers.md`](./phase6-narrative-shapers.md).
+**C5. Narrative-shaper analytics (Phase 6 — implemented).**
 
 - **Influence-weighted Opinion Index** (`/overview` → `weightedOpinionIndex`): the opinion that is
   actually *reaching* people. Each company post is weighted by author boost × amplification:

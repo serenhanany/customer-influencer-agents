@@ -33,6 +33,12 @@ yarn-debug.log*
 # Screenshots / scratch artifacts
 .preview-*.png
 
+# Internal planning docs — kept locally, not shared in the repo
+docs/PLAN.md
+docs/TASKS.md
+docs/phase6-narrative-shapers.md
+MCP_PLAN.md
+
 # OS & editor files
 .DS_Store
 Thumbs.db

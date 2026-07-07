@@ -1,6 +1,6 @@
 # Architecture
 
-**Last updated:** 2026-07-05 · Related: [`PLAN.md`](./PLAN.md) · [`analytics-methodology.md`](./analytics-methodology.md) · [`phase6-narrative-shapers.md`](./phase6-narrative-shapers.md) · [`../CLAUDE.md`](../CLAUDE.md)
+**Last updated:** 2026-07-05 · Related: [`analytics-methodology.md`](./analytics-methodology.md) · [`../CLAUDE.md`](../CLAUDE.md)
 
 ## 1. Overview & responsibilities
 
@@ -218,8 +218,8 @@ Project/
 │   │                                 #   interactive Swagger UI at /openapi
 │   └── app/                          # built client (vite build output, served by Express at /app)
 │
-├── docs/                             # PLAN, TASKS, architecture, analytics-methodology, design,
-│                                     #   phase6-narrative-shapers, README (this folder)
+├── docs/                             # architecture, analytics-methodology, design,
+│                                     #   mcp-tools, mcp-inspector, README (this folder)
 ├── Dockerfile                        # multi-stage build (builder → pruned runner image)
 ├── docker-entrypoint.sh              # runs `prisma migrate deploy`, then seeds iff SEED_DB=true
 └── CLAUDE.md                         # coding standards & house rules (authoritative)
