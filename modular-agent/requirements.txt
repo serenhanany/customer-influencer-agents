@@ -1,0 +1,12 @@
+langchain
+langchain-core
+langchain-anthropic
+langchain-google-genai
+langchain-mcp-adapters
+mcp
+python-dotenv
+rich
+pydantic
+pytest
+pytest-asyncio
+chromadb    # semantic (long-term) memory — opt-in; imported lazily
