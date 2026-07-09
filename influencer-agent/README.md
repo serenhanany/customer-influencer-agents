@@ -117,26 +117,4 @@ Two config files are provided; only one field differs (the `llms:` block) betwee
 
 Select one via `NAT_CONFIG_FILE` (see `docker-compose.yml` / the env vars table below).
 
-## Environment variables
 
-| Variable | Default | Meaning |
-|---|---|---|
-| `NVIDIA_API_KEY` | — | Required when `NAT_CONFIG_FILE` points at the NIM config. |
-| `OPENAI_API_KEY` | — | Required when `NAT_CONFIG_FILE` points at the OpenAI config. |
-| `NAT_CONFIG_FILE` | `configs/config.nim.yml` | Which NAT workflow config to serve. |
-| `NAT_SERVE_PORT` | `8000` | Port `nat serve` listens on inside the container (localhost-only). |
-| `SOCIAL_NETWORK_BASE_URL` | `http://localhost:3000` | Base URL of the social_network API. |
-| `COMPANY_NAME` | `HappyTuna` | Passed into the persona prompt; keep in sync with social_network's own `COMPANY_NAME`. |
-| `PERSONA_FILE` | `brand_supporter.yaml` | Which file under `personas/` this container plays. |
-| `BASE_PERSONA_TEMPLATE_PATH` | `/app/docs/influencer_persona_prompt.md` | Path to the Week 2 base template (mounted by compose). |
-| `STATE_DIR` | `/app/state` | Where per-persona "last seen post" cursors are written. |
-| `POLL_INTERVAL_SECONDS` | `30` | How often the poller checks social_network for new posts. |
-| `FEED_PAGE_SIZE` | `20` | Page size used when paging the global feed. |
-
-## Adding a second persona (e.g. consumer-rights or sensational)
-
-1. Copy `personas/brand_supporter.yaml` to `personas/<new_name>.yaml`; set `name`, `handle`,
-   `bio`, and attribute values matching the archetype (see `../docs/persona_attributes.md`).
-2. Run a second instance of this container with `PERSONA_FILE=<new_name>.yaml` and a
-   different `NAT_SERVE_PORT`/host port (each persona is its own social_network user and
-   its own poller loop; nothing else needs to change).
