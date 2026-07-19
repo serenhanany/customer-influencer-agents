@@ -100,7 +100,9 @@ Use deterministic rules for safety-critical triggers. Reserve LLM-based routing 
 ### Not yet designed
 - Social Network post/comment schema
 - Event Generator's event schema (the crisis-trigger events — distinct from the ticket activity log above)
-- Agent persona prompt templates (draft personas exist in `docs/`, not yet wired to an LLM)
+
+Agent persona prompt templates (`docs/`) **are** now wired to an LLM for both Customer and
+Influencer agents — see `customer-agent/README.md` and `influencer-agent/README.md`.
 
 ---
 
@@ -146,8 +148,8 @@ docker compose up --build
 
 | Service | What it is | URL |
 |---|---|---|
-| `customer-agent` | Customer agent (placeholder — not yet wired to an LLM) | — |
-| `influencer-agent` | Influencer agent (placeholder — not yet wired to an LLM) | — |
+| `customer-agent` | Customer agent (NAT + NeMo Guardrails, wired to a real NIM model). Served as an MCP tool, not REST — no browsable URL. See `customer-agent/README.md`. | MCP endpoint at `http://localhost:8001/mcp` (tool: `customer_agent_react`) |
+| `influencer-agent` | Influencer agent (NAT-based, polls `social_network` and reacts). See `influencer-agent/README.md`. | http://localhost:8002/docs (NAT's own Swagger UI) |
 | `customer-support-api` | Customer Support backend (FastAPI) | http://localhost:8003 (docs at `/docs`) |
 | `customer-support-dashboard` | Customer Support monitoring UI | http://localhost:5173 |
 
@@ -170,4 +172,4 @@ See `Customer_Support_System/README.md` for details specific to that service (wh
 
 - Confirm with Team 2 what their internal escalation/audit activity looks like, so naming (`actor` values, activity types) lines up across teams.
 - Confirm with Team 4 whether their event engine expects a specific envelope format, so our event generator and activity log can feed into it without duplication.
-- `customer-agent` / `influencer-agent` are currently placeholders (`print(...)` then exit) — need real LLM wiring before they do anything in the simulation.
+- `customer-agent` and `influencer-agent` are both wired to a real LLM (NVIDIA NIM via NAT) as of Week 3 — see each service's own `README.md` for details. `influencer-agent` has a `poller.py` that autonomously watches `social_network` and reacts; `customer-agent` does **not** yet have an equivalent driver — nothing currently calls it automatically in response to crisis events, it's only invocable on demand as an MCP tool.

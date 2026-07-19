@@ -71,6 +71,69 @@ The API allows requests from `http://localhost:5173` via `CORSMiddleware` in `ma
 
 ---
 
+## MCP server (for agents)
+
+Alongside the REST API, this service also exposes an **MCP server** (`mcp_server.py`) — the same underlying operations, but as MCP tools instead of HTTP endpoints. This is what agents (Customer, Influencer, COO, etc.) should use to interact with Customer Support, rather than making raw HTTP calls.
+
+Both the REST API and the MCP server call the same `storage.py` functions and share the same SQLite database — a ticket created via an MCP tool call shows up in the dashboard immediately, and vice versa. Verified safe for concurrent use from separate containers (tested with 5 simultaneous processes writing to the same database file with zero collisions or corruption).
+
+### Available tools
+
+| Tool | Mirrors | Purpose |
+|---|---|---|
+| `create_ticket` | `POST /tickets` | File a new ticket. Sentiment is auto-scored from the description. |
+| `get_ticket` | `GET /tickets/{id}` | Fetch one ticket by id. |
+| `list_tickets` | `GET /tickets` | List/filter tickets. Returns `{"count": N, "tickets": [...]}`. |
+| `patch_ticket` | `PATCH /tickets/{id}` | Update any field; auto-logs the change. |
+| `get_activity_log` | `GET /tickets/{id}/activity` | Full history for a ticket. Returns `{"count": N, "entries": [...]}`. |
+
+### Connecting to it
+
+The server runs on **streamable-http** transport (not stdio), since agents live in separate containers and need to reach it over the network, not as a local subprocess.
+
+| Caller | URL |
+|---|---|
+| From your own machine (manual testing) | `http://localhost:8010/mcp` |
+| From another container on the same Docker network (e.g. the Customer agent) | `http://customer-support-mcp:8010/mcp` |
+
+Containers reach each other by **service name**, not `localhost` — `localhost` inside a container only refers to that container itself.
+
+### Example: an agent calling a tool
+
+```python
+from mcp import ClientSession
+from mcp.client.streamable_http import streamablehttp_client
+
+async def file_ticket():
+    async with streamablehttp_client("http://customer-support-mcp:8010/mcp") as (read, write, _):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            result = await session.call_tool("create_ticket", {
+                "customer_id": "CUST-1190",
+                "issue_type": "safety_concern",
+                "subject": "Metal fragment in tuna",
+                "description": "Found something sharp in my can, this is dangerous",
+                "linked_product_batch": "4471",
+            })
+            print(result.content[0].text)
+```
+
+### Running it
+
+Via Docker (recommended — see root `docker-compose.yml`):
+```bash
+docker compose up --build customer-support-mcp
+```
+
+Locally without Docker:
+```bash
+cd Customer_Support_System
+pip install -r requirements.txt
+python mcp_server.py
+```
+
+---
+
 ## Example requests
 
 ### 1. Create a ticket
