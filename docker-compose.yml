@@ -58,6 +58,12 @@ services:
     volumes:
       - social_network_data:/app/data
 
+  event-generator:
+    build: ./event-generator
+    container_name: event-generator
+    ports:
+      - "8006:8000"
+
 volumes:
   customer_support_data:
   social_network_data:
