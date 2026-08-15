@@ -224,25 +224,6 @@ blocking the read loop.
 
 ---
 
-## Tests
-
-```bash
-pip install -r requirements-dev.txt
-pytest
-```
-
-Self-contained — no external network, no API keys, no container.
-
-Both suites work around the same obstacle: httpx's `ASGITransport` awaits the whole ASGI app
-before returning a response, so an endless SSE stream never completes and the call just hangs.
-
-- `test_server.py` drives the ASGI protocol directly (`SSEClient`), which also lets a test cancel
-  a connection and assert the disconnect cleanup ran. Use it if you add server-side stream tests.
-- `test_client.py` can't do that — the client speaks real HTTP — so it runs uvicorn on an
-  ephemeral loopback port. No fixed port, so it won't collide with a running container.
-
----
-
 ## Files
 
 | File | |
@@ -252,6 +233,3 @@ before returning a response, so an endless SSE stream never completes and the ca
 | `server.py` | FastAPI app: SSE fan-out, `/emit`, `/replay` |
 | `event_client.py` | `subscribe()` — what agents import to listen |
 | `example_subscriber.py` | Working listener; the template to copy |
-| `tests/test_server.py` | Server tests, driven through ASGI |
-| `tests/test_client.py` | Client tests, against uvicorn on a loopback port |
-| `CLAUDE.md` | Coding guidelines for this folder |
