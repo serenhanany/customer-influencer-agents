@@ -1,56 +1,59 @@
-"""Usage example: an always-on listener that handles only the "press" tag.
+"""Usage example: a listener that handles only the "press" tag.
 
-The pattern is always the same three steps:
+Subscribing is the two lines in main() - event_client handles the connection,
+the reconnects, and unwrapping each event. Everything else in this file is the
+demo around it.
 
-    1. create an Event broker,
-    2. subscribe a callback to the tag(s) you care about,
-    3. stay alive so the callback keeps getting called.
+To build a real listener, copy this file and change two things: the tag, and the
+body of press_agent().
 
-Here the process runs until Ctrl+C, replaying the crisis feed on a loop so
-there is always something coming in. In a real deployment step 3 is whatever
-keeps your service up (a web server, a queue consumer, a scheduler) and the
-events are emitted by that, not by a replay loop.
+Run the generator first, then this script:
+
+    docker compose up event-generator
+    python example_subscriber.py
+    curl -X POST http://localhost:8006/replay     # in another terminal
 """
 
-import time
+from __future__ import annotations
 
-from event_broker import Event
-from event_generator import generate
+import asyncio
+import logging
+
+from event_client import subscribe
+
+TAG = "press"
 
 
-def press_agent(text: str):
+async def press_agent(text: str) -> None:
     """Called once per "press" event, with the event text as its only argument.
 
     This is the seam for the real work: swap the print for a call to your AI
-    agent and hand it `text` as the prompt. Emitting is synchronous, so the
-    generator waits on this function - keep it quick, or hand the text off to a
-    thread or a queue if the agent is slow.
+    agent and hand it `text` as the prompt. Awaiting a slow agent here delays
+    the next event - if that matters, push the text onto a queue instead.
     """
-    print(f"[press_agent] received:\n{text}\n")
+    # flush because print() block-buffers when stdout isn't a terminal: piped or
+    # redirected, a long-running listener otherwise looks dead for a long while.
+    print(f"[press_agent] received:\n{text}\n", flush=True)
 
 
-def main():
-    event = Event()
+async def main() -> None:
+    # Shows the client's reconnect messages; drop it and they stay silent.
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    # httpx logs a line per request at INFO, which is noise for a long-lived stream.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    print(f"Listening on tag '{TAG}'. Ctrl+C to stop.\n", flush=True)
 
-    # Only "press" is subscribed, so this listener sees the Day 3, Day 7 and
-    # Day 10 briefings. The "social" and "regulator" events still get emitted,
-    # they just have no listener here and pass by untouched. Subscribe to more
-    # tags by calling subscribe again with the same callback.
-    event.subscribe(press_agent, "press")
-    print("Listening on tag 'press'. Ctrl+C to stop.\n")
-
-    try:
-        while True:
-            # One pass through the 5 scripted events, paced 2s apart so the
-            # escalation is readable. delay=0 fires them back to back.
-            generate(event, delay=2.0)
-            print("--- feed finished, replaying in 5s ---\n")
-            time.sleep(5)
-    except KeyboardInterrupt:
-        # Tidy shutdown: drop the listener so nothing is left registered.
-        event.unsubscribe(press_agent)
-        print("\nStopped listening.")
+    # Only "press" is subscribed, so this sees the Day 3, Day 7 and Day 10
+    # briefings. The "social" and "regulator" events are still emitted, they
+    # just aren't routed here. Pass more tags to follow several: subscribe(
+    # "press", "social").
+    async for event in subscribe(TAG):
+        await press_agent(event.text)
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        # Closing the connection is the unsubscribe - nothing else to clean up.
+        print("\nStopped listening.")
