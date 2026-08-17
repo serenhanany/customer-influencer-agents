@@ -36,3 +36,19 @@ pytest-asyncio==1.4.0
 # httpx arrives as a transitive dependency of mcp 1.x and is imported directly by
 # connection.py to classify connection failures. Left unpinned so mcp's own
 # constraint governs the version.
+
+
+
+
+
+# Requirement for the Ceo Agent
+langchain-text-splitters>=0.3.0,<0.4.0
+langchain-core>=0.3.0,<0.4.0
+langchain-google-genai>=2.0.0,<3.0.0
+google-generativeai>=0.8.0,<0.9.0
+python-dotenv>=1.0.0,<2.0.0
+langchain-chroma>=0.2.0,<0.3.0
+nvidia-nat[langchain]
+fastapi>=0.115.0,<1.0.0
+uvicorn>=0.35.0,<1.0.0
+requests>=2.32.0,<3.0.0
