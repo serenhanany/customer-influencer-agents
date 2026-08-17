@@ -16,11 +16,17 @@ Read-only by default: no tickets, no posts. The one write test is marked
 It creates a ticket and patches it, leaving rows in the real Customer Support
 database. That is the only way to prove the injected actor reaches the activity
 log, which is why it exists and why it is off by default.
+
+The `smoke` tests are deselected too, for a different reason -- not danger but
+cost. They call every read tool on the CEO's surface, one round trip each:
+
+    pytest ceo_agent/tests/test_integration.py -m smoke -s
 """
 
 from __future__ import annotations
 
 import json
+from typing import Any
 
 import pytest
 
@@ -291,6 +297,204 @@ async def test_audit_records_the_access_level_and_timing(router, tmp_path):
     assert end["ok"] is True
     assert end["elapsed_ms"] > 0
     assert "timestamp" in end
+
+
+# ---------------------------------------------------------------------------
+# smoke -- off by default: `pytest ceo_agent/tests/test_integration.py -m smoke`
+# ---------------------------------------------------------------------------
+#
+# Everything above proves the gateway is correct: the catalog is complete, the
+# policy holds, a call is routed and audited. None of it proves the servers on
+# the other end answer. A tool can be catalogued, permitted, and schema-correct
+# and still 500 on every call -- the CEO would face a surface that looks whole
+# and is hollow, and nothing here would notice, because the one real read above
+# deliberately picks the cheapest argument-free tool it can find.
+#
+# So: call every read tool once, report what came back. One round trip per tool
+# and a dependence on seeded data, which is why it is behind a marker rather
+# than in the default run.
+
+
+#: Read tools that need an argument no schema can supply, where any value will
+#: do: these query, and a query matching nothing still comes back 200 from a
+#: live server. Ids are the opposite -- a made-up one 404s and proves nothing --
+#: so those are resolved from live data in `_resolve_smoke_args` instead.
+#:
+#: get_hashtag_posts belongs here rather than there: an unknown tag returns an
+#: empty list, not an error (`hashtagService.ts:15`). The resolver still prefers
+#: a real trending tag when the platform has one.
+SMOKE_LITERAL_ARGS: dict[str, dict[str, Any]] = {
+    "analytics.search": {"q": "tuna"},
+    "social.search": {"q": "tuna"},
+    "analytics.get_hashtag_posts": {"tag": "tuna"},
+}
+
+
+def _first_value(payload: Any, key: str) -> str | None:
+    """The first non-empty string under `key`, depth-first.
+
+    Walks the payload rather than assuming its shape: social returns a bare
+    array, support returns `{"count", "tickets"}`, and hard-coding either would
+    make this fail for a reason that has nothing to do with the servers.
+
+    Depth-first order is load-bearing. A post carries its author inline, and a
+    dict is checked for `key` before its children are, so a post's own "id" is
+    always reached before the author's -- the ids never cross.
+    """
+    if isinstance(payload, dict):
+        value = payload.get(key)
+        if isinstance(value, str) and value:
+            return value
+        for nested in payload.values():
+            found = _first_value(nested, key)
+            if found is not None:
+                return found
+    elif isinstance(payload, list):
+        for item in payload:
+            found = _first_value(item, key)
+            if found is not None:
+                return found
+    return None
+
+
+async def _resolve_smoke_args(router) -> tuple[dict[str, dict[str, Any]], dict[str, str]]:
+    """Live arguments for the read tools that need one, and why any were skipped.
+
+    Returns `(args by qualified name, skip reason by qualified name)`. An empty
+    database is a skip, not a failure: `get_ticket` cannot be blamed for there
+    being no tickets, and a smoke run against a fresh database should still
+    report on the other twenty tools.
+    """
+    args: dict[str, dict[str, Any]] = {n: dict(a) for n, a in SMOKE_LITERAL_ARGS.items()}
+    skips: dict[str, str] = {}
+
+    async def resolve(source: str, key: str, targets: dict[str, str], what: str) -> None:
+        """Reads one listing tool and fans its first id out to the tools needing it.
+
+        Tools already carrying a literal keep it if nothing can be resolved --
+        only the ones with no usable argument at all are skipped.
+        """
+        result = await router.call_tool(source, {})
+        if not result.ok:
+            reason = f"could not resolve a {what}: {source} failed ({result.error})"
+        else:
+            value = _first_value(result.data, key)
+            if value is not None:
+                for target, param in targets.items():
+                    args[target] = {param: value}
+                return
+            reason = f"no {what} in the live data: {source} returned none"
+        for target in targets:
+            if target not in args:
+                skips[target] = reason
+
+    await resolve("support.list_tickets", "ticket_id", {
+        "support.get_ticket": "ticket_id",
+        "support.get_activity_log": "ticket_id",
+    }, "ticket id")
+    await resolve("social.get_global_feed", "id", {
+        "social.get_post": "id",
+        "analytics.get_post": "id",
+        "social.get_comments": "postId",
+    }, "post id")
+    await resolve("analytics.get_top_influencers", "id", {
+        "social.get_user": "id",
+    }, "user id")
+    await resolve("social.get_trending_hashtags", "tag", {
+        "analytics.get_hashtag_posts": "tag",
+    }, "hashtag")
+
+    return args, skips
+
+
+@pytest.mark.smoke
+async def test_every_read_tool_responds(router):
+    """Calls all 22 read tools on the CEO's surface and reports which answered."""
+    reads = sorted((e for e in router.get_tools() if e.access == "read"),
+                   key=lambda e: e.qualified_name)
+    assert reads, "no read tools are visible to the CEO"
+
+    args_by_tool, skips = await _resolve_smoke_args(router)
+
+    lines: list[str] = []
+    failures: list[str] = []
+    uncallable: list[str] = []
+    responded = 0
+
+    for entry in reads:
+        name = entry.qualified_name
+
+        if name in skips:
+            lines.append(f"  skip            {name} -- {skips[name]}")
+            continue
+
+        args = args_by_tool.get(name, {})
+        shown = json.dumps(args, sort_keys=True)
+        missing = [p for p in entry.input_schema.get("required", []) if p not in args]
+        if missing:
+            lines.append(f"  ????            {name} -- no value for {', '.join(missing)}")
+            uncallable.append(f"{name} requires {missing}, which nothing supplies")
+            continue
+
+        result = await router.call_tool(name, args)
+
+        if result.ok:
+            responded += 1
+            lines.append(f"  ok     {result.elapsed_ms:7.1f}ms  {name} {shown}")
+        else:
+            lines.append(f"  FAIL   {result.elapsed_ms:7.1f}ms  {name} {shown} -- {result.error}")
+            # Named with the args, so a broken upstream tool is distinguishable
+            # from a wrong argument on our side without a second run.
+            failures.append(f"{name} called with {shown} -- {result.error}")
+
+    skipped = sum(1 for e in reads if e.qualified_name in skips)
+    report = "\n".join([
+        f"{responded} of {len(reads)} read tools responded "
+        f"({len(failures)} failed, {skipped} skipped, {len(uncallable)} uncallable)",
+        *lines,
+    ])
+    print("\n" + report)
+
+    assert not uncallable, (
+        "the smoke test cannot call every read tool the CEO can see, so it is no "
+        "longer proof of the whole surface. Add a literal to SMOKE_LITERAL_ARGS, "
+        "or resolve one from live data in _resolve_smoke_args:\n  "
+        + "\n  ".join(uncallable) + "\n\n" + report
+    )
+    assert not failures, (
+        "read tools that did not respond:\n  " + "\n  ".join(failures) + "\n\n" + report
+    )
+
+
+@pytest.mark.smoke
+async def test_the_write_tools_are_present_and_tagged_without_being_called(dry_router):
+    """The rest of the surface, asserted without publishing anything.
+
+    Three writes, and this test calls none of them for real. The two public ones
+    are exercised only as far as the dry-run gate, which is itself the assertion:
+    the ids below are fabricated, so a regression that let them through would
+    fail on a 404 rather than put words in the CEO's mouth.
+    """
+    access_by_name = {e.qualified_name: e.access for e in dry_router.get_tools()}
+    writes = {n: a for n, a in access_by_name.items() if a != "read"}
+
+    assert writes == {
+        "social.create_post": "public_write",
+        "social.add_comment": "public_write",
+        "support.patch_ticket": "write",
+    }
+
+    for name, args in (
+        ("social.create_post", {"content": "pytest smoke -- must never be published"}),
+        ("social.add_comment", {"postId": "smoke-no-such-post",
+                                "content": "pytest smoke -- must never be published"}),
+    ):
+        result = await dry_router.call_tool(name, args)
+
+        assert result.ok is True, f"{name} -- {result.error}"
+        assert result.data == {"dry_run": True, "would_send": args}
+        # Nothing came back because nothing was sent.
+        assert result.text is None, f"{name} reached the server: {result.text!r}"
 
 
 # ---------------------------------------------------------------------------

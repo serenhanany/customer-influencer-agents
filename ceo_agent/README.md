@@ -16,7 +16,7 @@ docker compose up -d social-network customer-support-mcp
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r ceo_agent/requirements.txt
 
-pytest                                          # 53 passed, 1 deselected
+pytest                                          # 53 passed, 3 deselected
 python3 ceo_agent/cli.py check --profile local  # 3/3 connected, 25 visible
 ```
 
@@ -95,6 +95,7 @@ python3 ceo_agent/cli.py check --profile local       # connect, catalogue, polic
 python3 ceo_agent/cli.py dump  --profile local       # the surface, as the model sees it (--all, --json)
 pytest ceo_agent/tests/test_unit.py                  # no network, no Docker
 pytest ceo_agent/tests/test_integration.py           # needs the servers; skips cleanly if down
+pytest -m smoke -s                                   # call all 22 read tools once, print the table
 ```
 
 ## Gotchas
