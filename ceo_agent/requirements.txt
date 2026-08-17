@@ -42,12 +42,18 @@ pytest-asyncio==1.4.0
 
 
 # Requirement for the Ceo Agent
-langchain-text-splitters>=0.3.0,<0.4.0
-langchain-core>=0.3.0,<0.4.0
-langchain-google-genai>=2.0.0,<3.0.0
+# NOTE: langchain-core is pinned once, above (==1.5.4), for the gateway's
+# StructuredTool usage. It used to be pinned again here at >=0.3.0,<0.4.0
+# (the pre-gateway langchain generation), which made `pip install` fail with
+# ResolutionImpossible -- two exact-conflicting constraints on the same
+# package. langchain-google-genai is bumped to match the 1.x langchain-core
+# line; its ChatGoogleGenerativeAI(model=, api_key=, temperature=) surface,
+# the only part llm_client.py uses, is unchanged across that range.
+langchain-text-splitters>=1.0.0
+langchain-google-genai>=2.0.0
 google-generativeai>=0.8.0,<0.9.0
 python-dotenv>=1.0.0,<2.0.0
-langchain-chroma>=0.2.0,<0.3.0
+langchain-chroma>=1.0.0
 nvidia-nat[langchain]
 fastapi>=0.115.0,<1.0.0
 uvicorn>=0.35.0,<1.0.0
