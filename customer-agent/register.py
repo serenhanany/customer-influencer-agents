@@ -44,6 +44,13 @@ def _get_memory(persona_id: str, initial_trust: float) -> dict:
     })
 
 
+def _clamp_trust_score(raw, fallback: float) -> float:
+    try:
+        return max(0.0, min(1.0, float(raw)))
+    except (TypeError, ValueError):
+        return fallback
+
+
 def _parse_decision(raw_text: str) -> dict:
     text = raw_text.strip()
     if text.startswith("```"):
@@ -135,11 +142,11 @@ async def customer_agent_decision(config: CustomerAgentDecisionConfig, builder: 
             ticket = json.loads(ticket_raw) if isinstance(ticket_raw, str) else ticket_raw
             result["ticket"] = ticket
 
-        memory["trust_score"] = decision.get("trust_score", memory["trust_score"])
+        memory["trust_score"] = _clamp_trust_score(decision.get("trust_score"), memory["trust_score"])
         memory["past_decisions"].append({
             "event": event,
             "action": decision.get("action"),
-            "trust_score": decision.get("trust_score"),
+            "trust_score": memory["trust_score"],
         })
 
         return result
