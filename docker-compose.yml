@@ -6,6 +6,11 @@ services:
       - "8001:8000"
     env_file:
       - .env
+    environment:
+      - EVENT_GENERATOR_URL=http://event-generator:8000
+    depends_on:
+      - event-generator
+      - customer-support-mcp
 
   influencer-agent:
     build: ./influencer-agent
