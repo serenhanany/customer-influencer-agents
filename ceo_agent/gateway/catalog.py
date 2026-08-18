@@ -102,6 +102,22 @@ TOOL_ACCESS: dict[str, dict[str, AccessLevel]] = {
         "get_trending_hashtags": "read",
         "get_hashtag_posts": "read",
     },
+    # internal-messaging-mcp (bitrix-internal-messaging), served at /mcp
+    "chat": {
+        # Same shape as social.login: binds this session to an agent identity, so
+        # every later call is authored by whoever it named. Connection-layer,
+        # owned by connection.py, denied to the role in roles.yaml.
+        "login": "write",
+        # Writes, but internal ones -- these land in the company's own chat, not
+        # on the public timeline, and none of them is visible to the simulated
+        # public. That is why they are "write" and not "public_write": the
+        # distinction in this table is blast radius, not reversibility.
+        "send_message": "write",
+        "create_channel": "write",
+        "add_member": "write",
+        "list_channels": "read",
+        "read_channel": "read",
+    },
 }
 
 
