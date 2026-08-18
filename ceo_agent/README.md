@@ -1,23 +1,28 @@
 # CEO Agent — MCP Gateway
 
-Connects to the three MCP servers the other teams run (Customer Support, Social
-Network, Social Analytics) and exposes a filtered tool set per role. It injects the
-caller's identity server-side, holds back irreversible public actions in dry run,
-and audits every call. It makes no decisions — the loop, prompts, and model are
-yours.
+Connects to the four MCP servers the other teams run (Customer Support, Social
+Network, Social Analytics, Internal Chat) and exposes a filtered tool set per
+role. It injects the caller's identity server-side, holds back every write in dry
+run, and audits every call. It makes no decisions — the loop, prompts, and model
+are yours.
 
 ## Setup
 
 ```bash
 # macOS ships python3, not python
 cp social_network/.env.example social_network/.env      # compose fails without it
+
+# The chat server lives in the bitrix-internal-actors stack, not this one. Bring
+# it up first: our compose joins its network as external, and a missing external
+# network is a hard compose failure, not a warning.
+docker compose -f ../bitrix-internal-actors/docker-compose.yml up -d
 docker compose up -d social-network customer-support-mcp
 
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r ceo_agent/requirements.txt
 
-pytest                                          # 53 passed, 3 deselected
-python3 ceo_agent/cli.py check --profile local  # 3/3 connected, 25 visible
+pytest                                          # 62 passed, 4 deselected
+python3 ceo_agent/cli.py check --profile local  # 4/4 connected, 30 visible
 ```
 
 `Customer_Support_System/requirements.txt` must pin `mcp==1.29.0`. Unpinned, pip
@@ -48,26 +53,39 @@ async with GatewayConnections(load_registry(profile="local")) as connections:
     })
 ```
 
-`dry_run=True` answers `create_post` and `add_comment` without sending them; reads
-and ticket writes still execute. Keep it on until the agent should speak in public.
+`dry_run=True` answers **every write** without sending it — public posts, ticket
+patches and chat alike; reads still execute, so the agent sees real data and
+changes nothing. Keep it on until the agent should act for real.
 Your brief needs no tool list — the model reads the schemas. `Router` never raises:
 check `result.ok`. `langchain`/`langgraph` are not dependencies of this package.
 
 ## What the CEO can do
 
-25 of 42 tools are visible to role `ceo`: the support queue, the analytics
-surface, and public reads. Three of them write:
+30 of 48 tools are visible to role `ceo`: the support queue, the analytics
+surface, public reads, and the internal chat. Six of them write:
 
 | Tool | |
 |---|---|
 | `social.create_post` | **irreversible, public** — no delete tool exists anywhere |
 | `social.add_comment` | **irreversible, public** — joins a thread, inherits its audience |
 | `support.patch_ticket` | respond, escalate, reassign |
+| `chat.send_message` | internal — speaks in a channel the org already has |
+| `chat.create_channel` | internal, **permanent** — no `delete_channel` anywhere |
+| `chat.add_member` | internal, **permanent** — no `remove_member` anywhere |
+
+The chat writes are classified `write`, not `public_write`: they land in the
+company's own chat, absent from every analytics number and invisible to the
+simulated public. The distinction in `TOOL_ACCESS` is blast radius, not
+reversibility — and by that measure they are irreversible too, hence the gotchas
+below.
 
 Hidden: `run_analysis` and `set_ai_analysis` (they mutate the numbers the CEO is
-scored against), `social.login` and `set_account_type` (identity), and
-`support.create_ticket` (fabricating a complaint). `customer-agent` is not in the
-registry at all — its one tool invents a customer *and* files a real ticket.
+scored against), `social.login`, `social.set_account_type` and `chat.login`
+(identity — connection.py runs the logins itself, the model never sees them), and
+`support.create_ticket` (fabricating a complaint). Chat is granted tool by tool
+rather than as `chat.*`, so anything that team ships later stays hidden until
+someone decides otherwise. `customer-agent` is not in the registry at all — its
+one tool invents a customer *and* files a real ticket.
 
 ## Adding an MCP server
 
@@ -84,6 +102,11 @@ Three edits, no code:
       local: http://localhost:8020/mcp
 ```
 
+If the server binds identity to the session — as `social` and `chat` both do,
+throwing 401 until it runs — add a `login` block too. `connection.py` owns it and
+replays it after every reconnect, so its arguments must be idempotent and stable
+for the whole simulation, and the tool itself belongs in `deny`.
+
 A live tool missing from `TOOL_ACCESS` aborts the catalog build, on purpose — an
 unassessed capability must not reach the agent by default. Forgetting to *grant*
 one just leaves it hidden. Update `RECORDED_*` in `tests/test_integration.py`.
@@ -95,14 +118,27 @@ python3 ceo_agent/cli.py check --profile local       # connect, catalogue, polic
 python3 ceo_agent/cli.py dump  --profile local       # the surface, as the model sees it (--all, --json)
 pytest ceo_agent/tests/test_unit.py                  # no network, no Docker
 pytest ceo_agent/tests/test_integration.py           # needs the servers; skips cleanly if down
-pytest -m smoke -s                                   # call all 22 read tools once, print the table
+pytest -m smoke -s                                   # call all 24 read tools once, print the table
 ```
 
 ## Gotchas
 
 - `--profile local` is required off-compose; the default `docker` profile uses
   compose hostnames that don't resolve from your host.
-- `pytest -m writes` creates and patches a real ticket. Off by default.
+- `pytest -m writes` creates and patches a real ticket, and creates a chat channel
+  and message. Off by default.
+- Dry run holds back **every write**, `write` and `public_write` alike; reads still
+  execute, so the agent sees real data and changes nothing. It gates on
+  `access != "read"`, so a new access level is withheld until someone decides
+  otherwise. It gated `public_write` only until chat arrived and made a dry run
+  able to open a channel with no delete tool — if you are cherry-picking across
+  that change, note that `support.patch_ticket` used to execute under dry run.
+- Chat state accretes and cannot be cleaned up from the tool surface: the server
+  exposes no `delete_channel` and no `remove_member`, so every `create_channel` and
+  `add_member` is permanent. Same shape of problem as the ticket rows above, on a
+  different server — but worse, because the CEO can reach these itself rather than
+  only the harness. Reset the `bitrix-internal-actors` stack between trials, or
+  trial N starts with N-1 incident channels left over.
 - A whole-server allow (`analytics.*`) sweeps in that server's writes. The explicit
   `deny` entries in `roles.yaml` are load-bearing — deleting one silently grants
   operator powers.
