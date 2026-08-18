@@ -5,6 +5,9 @@
 #   local            -- host-published ports, for running the gateway off-compose
 # Override with the GATEWAY_URL_PROFILE env var. Local ports come from
 # docker-compose.yml: customer-support-mcp is 8010:8010, social-network is 3005:3000.
+# chat is the exception -- it is served by a different compose project entirely
+# (bitrix-internal-actors), which our docker-compose.yml joins as an external
+# network. See the note on that entry.
 #
 # Excluded on purpose:
 #   customer-agent (http://customer-agent:8000/mcp) -- its one tool,
@@ -54,3 +57,24 @@ servers:
       - tool: set_account_type
         args:
           accountType: official
+
+  - id: chat
+    enabled: true
+    timeout_seconds: 30.0
+    urls:
+      # This server is not in this project's compose -- it belongs to the
+      # separate `bitrix-internal-actors` stack, which must be up. Our
+      # docker-compose.yml joins that stack's network as an external network, and
+      # the container already answers to this alias, so the name below resolves
+      # for a containerized gateway. The gateway is not containerized today, so
+      # in practice this entry connects under GATEWAY_URL_PROFILE=local.
+      docker: http://internal-messaging-mcp:8090/mcp
+      local: http://localhost:8090/mcp
+    # Identity is bound to the MCP session by login, exactly like social: every
+    # other tool returns 401 until it runs, and the server resolves the role from
+    # its own registry -- agent_id selects who you are, not what you may do.
+    # Replayed after every reconnect, so CEO-1 must stay stable mid-simulation.
+    login:
+      tool: login
+      args:
+        agent_id: CEO-1

@@ -225,8 +225,9 @@ class Router:
 
         if dry_run:
             logger.warning(
-                "Router is in DRY RUN: public_write calls will be answered without "
-                "reaching the server. Reads and writes still execute normally."
+                "Router is in DRY RUN: every write is answered without reaching the "
+                "server -- public_write and write alike. Reads still execute normally, "
+                "so the agent sees real data and changes nothing."
             )
 
     @property
@@ -373,8 +374,18 @@ class Router:
         for param in INJECTED_PARAMS.get(qualified_name, set()):
             args[param] = self._actor
 
-        # Only the irreversible public actions are held back.
-        if self._dry_run and access == "public_write":
+        # Every write is held back, tested as "not a read" rather than by listing
+        # the write levels. A level added to AccessLevel later is then withheld by
+        # default and someone has to decide to let it through, which is the same
+        # fail-safe direction as policy.py's default-deny.
+        #
+        # This used to gate `access == "public_write"`, on the reasoning that only
+        # the irreversible public actions were worth stopping. That made the flag
+        # narrower than its name: a dry run still patched real tickets, and once
+        # chat arrived it could open channels on a server with no delete_channel
+        # and no remove_member -- a permanent side effect from a run whose whole
+        # promise is that it has none. "Dry run" has to mean nothing is written.
+        if self._dry_run and access != "read":
             result = ToolResult(
                 qualified_name=qualified_name,
                 server_id=entry.server_id,

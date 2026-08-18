@@ -8,14 +8,17 @@ Skipped cleanly, with instructions, when nothing is reachable -- see the
 that is down when the others are up is a real failure, and
 `test_all_servers_connect` is meant to catch it.
 
-Read-only by default: no tickets, no posts. The one write test is marked
-`writes` and deselected by pytest.ini's addopts. To run it:
+Read-only by default: no tickets, no posts, no messages. The write tests are
+marked `writes` and deselected by pytest.ini's addopts. To run them:
 
     pytest ceo_agent/tests/test_integration.py -m writes
 
-It creates a ticket and patches it, leaving rows in the real Customer Support
-database. That is the only way to prove the injected actor reaches the activity
-log, which is why it exists and why it is off by default.
+They leave rows in the real Customer Support database (a ticket and its patch)
+and in the real chat store (a channel and a message). Each proves an identity
+guarantee that cannot be proved read-only: that the injected actor reaches the
+support activity log, and that the chat session's login binding survives across
+calls. The chat rows are the more expensive of the two -- that server has no
+delete_channel and no remove_member, so they are permanent.
 
 The `smoke` tests are deselected too, for a different reason -- not danger but
 cost. They call every read tool on the CEO's surface, one round trip each:
@@ -27,6 +30,7 @@ from __future__ import annotations
 
 import json
 from typing import Any
+from uuid import uuid4
 
 import pytest
 
@@ -40,10 +44,10 @@ pytestmark = pytest.mark.integration
 # things here that need updating when a server is added or a team ships a tool --
 # see the invariant tests below, which never do. A failure here is either an
 # upstream change worth knowing about, or an intended change worth recording.
-RECORDED_SERVERS = 3
-RECORDED_TOOLS = 42
-RECORDED_VISIBLE = 25
-RECORDED_HIDDEN = RECORDED_TOOLS - RECORDED_VISIBLE  # 17
+RECORDED_SERVERS = 4
+RECORDED_TOOLS = 48
+RECORDED_VISIBLE = 30
+RECORDED_HIDDEN = RECORDED_TOOLS - RECORDED_VISIBLE  # 18
 
 
 @pytest.fixture()
@@ -246,6 +250,34 @@ async def test_dry_run_does_not_reach_the_server(dry_router, tmp_path):
     assert end[-1]["outcome"] == "dry_run"
 
 
+async def test_dry_run_holds_back_plain_writes_too(dry_router, tmp_path):
+    """The regression guard for a gap that shipped once already.
+
+    The gate used to test `access == "public_write"`, so a dry run published
+    nothing but still patched real tickets and, once chat arrived, could open a
+    channel on a server with no delete_channel. The test above did not catch it
+    because it only ever exercised a public_write, which is precisely how the gap
+    survived. This one asserts the other level.
+
+    chat.create_channel is the case that matters: its arguments here are valid, so
+    if the gate narrows again this test does not merely fail -- it creates a
+    channel that cannot be removed. That is the cost of proving it, and the reason
+    the assertion is worth having rather than trusting the constructor's warning.
+    """
+    args = {"type": "incident", "members": ["COO-1"],
+            "name": "pytest -- must never be created"}
+
+    result = await dry_router.call_tool("chat.create_channel", args)
+
+    assert result.ok is True, result.error
+    assert result.data == {"dry_run": True, "would_send": args}
+    assert result.text is None, f"chat.create_channel reached the server: {result.text!r}"
+
+    end = [r for r in audit_records(tmp_path / "audit.jsonl") if r["event"] == "call_end"][-1]
+    assert end["outcome"] == "dry_run"
+    assert end["access"] == "write", "the point of this test is the non-public level"
+
+
 async def test_dry_run_still_lets_reads_through(dry_router):
     name = _first_argless_read(dry_router)
 
@@ -259,7 +291,7 @@ def test_get_status_reports_every_configured_server(router):
     statuses = router.get_status()
 
     assert len(statuses) == RECORDED_SERVERS
-    assert {s.server_id for s in statuses} == {"support", "analytics", "social"}
+    assert {s.server_id for s in statuses} == {"support", "analytics", "social", "chat"}
 
 
 # ---------------------------------------------------------------------------
@@ -323,6 +355,14 @@ async def test_audit_records_the_access_level_and_timing(router, tmp_path):
 #: get_hashtag_posts belongs here rather than there: an unknown tag returns an
 #: empty list, not an error (`hashtagService.ts:15`). The resolver still prefers
 #: a real trending tag when the platform has one.
+#: Parameters the router injects, which therefore appear in a dry run's
+#: `would_send` without the caller having passed them. Mirrors INJECTED_PARAMS in
+#: router.py; kept here as a literal so the test states the expected value rather
+#: than importing the thing it is checking.
+INJECTED_ON_DRY_RUN: dict[str, dict[str, Any]] = {
+    "support.patch_ticket": {"actor": "ceo"},
+}
+
 SMOKE_LITERAL_ARGS: dict[str, dict[str, Any]] = {
     "analytics.search": {"q": "tuna"},
     "social.search": {"q": "tuna"},
@@ -403,13 +443,22 @@ async def _resolve_smoke_args(router) -> tuple[dict[str, dict[str, Any]], dict[s
     await resolve("social.get_trending_hashtags", "tag", {
         "analytics.get_hashtag_posts": "tag",
     }, "hashtag")
+    # Chat ids are resolved, never literal: the server answers a channel the CEO
+    # is not a member of exactly as it answers one that does not exist
+    # (service.py:79-81), so a made-up id would look like a clean failure and
+    # prove nothing. CEO-1 is seeded into at least one channel by the chat stack,
+    # so on a seeded database this resolves; on an empty one it skips rather than
+    # failing, like every other resolver here.
+    await resolve("chat.list_channels", "channel", {
+        "chat.read_channel": "channel",
+    }, "chat channel id")
 
     return args, skips
 
 
 @pytest.mark.smoke
 async def test_every_read_tool_responds(router):
-    """Calls all 22 read tools on the CEO's surface and reports which answered."""
+    """Calls all 24 read tools on the CEO's surface and reports which answered."""
     reads = sorted((e for e in router.get_tools() if e.access == "read"),
                    key=lambda e: e.qualified_name)
     assert reads, "no read tools are visible to the CEO"
@@ -468,12 +517,20 @@ async def test_every_read_tool_responds(router):
 
 @pytest.mark.smoke
 async def test_the_write_tools_are_present_and_tagged_without_being_called(dry_router):
-    """The rest of the surface, asserted without publishing anything.
+    """The rest of the surface, asserted without writing anything.
 
-    Three writes, and this test calls none of them for real. The two public ones
-    are exercised only as far as the dry-run gate, which is itself the assertion:
-    the ids below are fabricated, so a regression that let them through would
-    fail on a 404 rather than put words in the CEO's mouth.
+    Six writes, and this test calls none of them for real: the dry-run gate
+    covers every one, which is itself the assertion. The arguments below are
+    fabricated, so a regression that let them through would fail on a 404 rather
+    than put words in the CEO's mouth -- except chat.create_channel, whose
+    arguments are perfectly valid and which would succeed.
+
+    So the order below is load-bearing, not alphabetical. Every call before
+    chat.create_channel names something that does not exist, and each is asserted
+    before the next runs. If the gate ever narrows back to public_write, one of
+    those fails first and aborts the loop, so the one call that would leave a
+    permanent channel on a server with no delete_channel is never reached. Keep
+    chat.create_channel last.
     """
     access_by_name = {e.qualified_name: e.access for e in dry_router.get_tools()}
     writes = {n: a for n, a in access_by_name.items() if a != "read"}
@@ -482,17 +539,35 @@ async def test_the_write_tools_are_present_and_tagged_without_being_called(dry_r
         "social.create_post": "public_write",
         "social.add_comment": "public_write",
         "support.patch_ticket": "write",
+        "chat.send_message": "write",
+        "chat.create_channel": "write",
+        "chat.add_member": "write",
     }
 
     for name, args in (
         ("social.create_post", {"content": "pytest smoke -- must never be published"}),
         ("social.add_comment", {"postId": "smoke-no-such-post",
                                 "content": "pytest smoke -- must never be published"}),
+        ("support.patch_ticket", {"ticket_id": "SMOKE-NO-SUCH-TICKET",
+                                  "status": "in_progress"}),
+        ("chat.send_message", {"channel": "smoke-no-such-channel",
+                               "body": "pytest smoke -- must never be sent"}),
+        ("chat.add_member", {"channel": "smoke-no-such-channel", "agent_id": "COO-1"}),
+        # Last, and valid: see the docstring. Everything above is a canary for it.
+        ("chat.create_channel", {"type": "incident", "members": ["COO-1"],
+                                 "name": "pytest smoke -- must never be created"}),
     ):
         result = await dry_router.call_tool(name, args)
 
+        # `would_send` is what the server would have received, which is not always
+        # what the caller passed: identity injection has already run by this point,
+        # so support.patch_ticket carries the actor the CEO cannot set itself. That
+        # is the useful thing about the payload -- a dry run shows the injected
+        # value, so the guarantee can be inspected without writing a ticket.
+        expected = dict(args) | INJECTED_ON_DRY_RUN.get(name, {})
+
         assert result.ok is True, f"{name} -- {result.error}"
-        assert result.data == {"dry_run": True, "would_send": args}
+        assert result.data == {"dry_run": True, "would_send": expected}
         # Nothing came back because nothing was sent.
         assert result.text is None, f"{name} reached the server: {result.text!r}"
 
@@ -558,6 +633,87 @@ async def test_actor_is_injected_as_ceo_on_a_real_ticket(gateway, router, tmp_pa
     end = [r for r in audit_records(tmp_path / "audit.jsonl")
            if r["event"] == "call_end" and r["qualified_name"] == "support.patch_ticket"][-1]
     assert end["args"]["actor"] == "ceo"
+
+
+def _chat_payload(result) -> dict:
+    """The chat server's own result envelope, unwrapped and checked.
+
+    Two `ok` flags stack on every chat call and only one of them is the gateway's.
+    The outer `ToolResult.ok` says the call reached the server and came back
+    without a transport error; the chat server then reports its own
+    `{ok, tool, value, error}` envelope in the body (mcp_server.py returns the raw
+    envelope deliberately). A permission or membership rejection comes back as a
+    *successful* call carrying `ok: false`, so asserting the outer flag alone
+    would pass on a 403 and read as proof of something it never tested.
+    """
+    assert result.ok is True, f"{result.qualified_name}: {result.error}"
+    payload = result.data
+    assert isinstance(payload, dict), (
+        f"{result.qualified_name} returned no JSON envelope: {result.text!r}"
+    )
+    assert payload.get("ok") is True, (
+        f"{result.qualified_name} was rejected by the chat server: {payload.get('error')!r}"
+    )
+    value = payload.get("value")
+    assert isinstance(value, dict), f"{result.qualified_name} envelope has no value: {payload!r}"
+    return value
+
+
+@pytest.mark.writes
+async def test_chat_identity_binding_holds_across_calls(router):
+    """Proves the CEO's chat identity survives from one call to the next.
+
+    The chat counterpart of the actor-injection test above, and a different
+    mechanism with the same failure mode. Support identity is injected into the
+    arguments of every call, so each call carries its own proof. Chat identity is
+    bound once, to the MCP *session*, by the login connection.py runs at startup
+    (`mcp_server.py` keys it on the `ServerSession` in a `WeakKeyDictionary`), and
+    every later call on that session inherits it. Nothing else in this file
+    exercises that: a binding that silently dropped would surface as messages
+    authored by the wrong agent, or as a 401 mid-crisis, and the read-only tests
+    would all still pass.
+
+    So: open a channel, post to it, read it back, and check the server agrees the
+    author was CEO-1 -- three separate calls, none of which passes an identity.
+
+    Leaves a channel and a message in the real chat store, and neither can be
+    removed: that server has no delete_channel and no remove_member. This is why
+    the test is behind the `writes` marker, and why the chat stack needs resetting
+    between trials. See README gotchas.
+    """
+    marker = f"pytest gateway integration -- safe to ignore [{uuid4().hex[:12]}]"
+
+    created = await router.call_tool("chat.create_channel", {
+        "type": "incident",
+        "members": ["COO-1"],
+        "name": "pytest fixture channel -- safe to ignore",
+    })
+    channel = _chat_payload(created).get("channel")
+    assert channel, f"no channel id in {created.data!r}"
+
+    # Note what is absent from both calls: any sender, author, or agent_id. The
+    # only place CEO-1 appears in this whole exchange is mcp_servers.yaml.
+    sent = await router.call_tool("chat.send_message", {"channel": channel, "body": marker})
+    _chat_payload(sent)
+
+    history = await router.call_tool("chat.read_channel", {"channel": channel})
+    messages = _chat_payload(history).get("messages")
+    assert isinstance(messages, list), f"no messages list in {history.data!r}"
+
+    # Matched on the marker rather than taking messages[-1]: the channel is fresh,
+    # but a seeded or concurrently-written one would make position meaningless.
+    mine = [m for m in messages if m.get("body") == marker]
+    assert mine, (
+        f"the message did not come back from the channel it was posted to. "
+        f"Sent {marker!r}, read back {[m.get('body') for m in messages]!r}"
+    )
+    assert len(mine) == 1, f"the marker came back {len(mine)} times: {mine!r}"
+
+    assert mine[0].get("sender") == "CEO-1", (
+        f"the message came back authored by {mine[0].get('sender')!r}, not 'CEO-1'. "
+        f"The session's login binding did not survive from create_channel to "
+        f"send_message -- every write the CEO makes in chat is misattributed."
+    )
 
 
 def test_advertised_schema_hides_actor(router):

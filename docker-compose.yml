@@ -67,3 +67,27 @@ services:
 volumes:
   customer_support_data:
   social_network_data:
+
+# The internal chat MCP server (mcp_servers.yaml: id `chat`) is deliberately not
+# a service here. It already is one -- `internal-messaging-mcp` in the separate
+# `bitrix-internal-actors` project, backed by that stack's own postgres, redis and
+# kafka. Declaring a second copy would build from a source tree outside this repo
+# and, worse, stand up a second chat store: the CEO would post into one while the
+# organization's actual chat was the other.
+#
+# So this joins that stack's network instead of duplicating it. The running
+# container already answers to the alias `internal-messaging-mcp`, which is
+# exactly the hostname the `docker` profile uses, so nothing else needs changing.
+#
+# Nothing here attaches to it yet -- the gateway has no Dockerfile and runs from
+# the host, which is why `GATEWAY_URL_PROFILE=local` is the working configuration
+# today. This is what a containerized gateway would attach to, and it is declared
+# now so the `docker` URL in mcp_servers.yaml names something real.
+#
+# Requires that stack to be up: `docker compose -f ../bitrix-internal-actors/
+# docker-compose.yml up -d`. An external network that does not exist is a hard
+# compose failure, not a warning.
+networks:
+  chat:
+    name: bitrix-internal-actors_default
+    external: true
