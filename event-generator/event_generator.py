@@ -1,73 +1,98 @@
-"""Scripted crisis feed: a salmonella outbreak traced to a HappyTuna product.
-
-The five events below are ordered by escalation, from a few scattered customer
-complaints to a nationwide recall and a lawsuit. Each one is plain text so it
-can be handed straight to an AI agent as a prompt.
-
-Tags mark where the news came from, so an agent can subscribe to only the
-channels it cares about (e.g. a PR agent on "press", a legal agent on "legal").
 """
+PLAN:
+
+Make the event generator work in one of two ways:
+Either it invokes an llm to generate a crisis feed, or it uses a pre-scripted feed. The latter is useful for demos and tests, while the former is useful for generating new scenarios.
+
+For the llm approach, the generator will go through a fixed loop every 0.25 seconds or so:
+5 customer events -> 1 press event -> [repeat]
+
+The main difference between the press and customer events is that the press events are more detailed and grounded (assumed to always be real events). Whereas the customer events are more likely to be emotional or sensationalized.
+
+[optional - USED via 6 stages] There exist a 'guiding hand' for the events that follows a pre scriped narrative. eg: start -> spread -> escalate -> lawsuits -> disease vanishes -> calm     (you could also let an llm create the narrative)
+
+[optional - NOT USED] Use coded statistics to determine what the llm should produce. (prompt engineering)
+
+Inside the generation loop:
+- determine if to generate a 'customer' or 'press' event.
+- run the statistics to create engineered prompt.
+- invoke llm to generate event
+- emit said event
+"""
+
 
 import time
 
 from event_broker import Event
 
-# (tag, briefing text) in the order the crisis unfolds.
-CRISIS_FEED = [
-    (
-        "social",
-        "Day 1 - Social listening alert.\n"
-        "Fourteen posts in the last six hours report nausea, cramps and fever "
-        "hours after eating HappyTuna Classic Chunk Light Tuna, 5oz can. "
-        "Three posters name the same lot code, HT-4471-B. One post has 22k "
-        "shares and a photo of the can. No press coverage yet.",
-    ),
-    (
-        "press",
-        "Day 3 - Local news pickup.\n"
-        "Two regional outlets are running the story. State health departments "
-        "now count 12 confirmed illnesses across 3 states, all interviewed "
-        "patients report HappyTuna canned tuna in the week before onset. "
-        "A reporter has emailed our press desk asking for comment by 5pm.",
-    ),
-    (
-        "regulator",
-        "Day 5 - FDA investigation opened.\n"
-        "Lab results identify Salmonella Enteritidis in two opened cans from "
-        "lot HT-4471-B, and the strain matches patient isolates. The FDA has "
-        "requested production and sanitation records for our Cebu plant and "
-        "asked whether we intend a voluntary recall. Case count is now 29 "
-        "across 7 states, 4 hospitalizations.",
-    ),
-    (
-        "press",
-        "Day 7 - Nationwide recall underway.\n"
-        "HappyTuna has issued a voluntary recall of 1.2 million cans spanning "
-        "lots HT-4471-B through HT-4478-B. Case count is 47 across 11 states, "
-        "9 hospitalizations. The two largest grocery chains have pulled all "
-        "HappyTuna SKUs, not just the recalled lots. National broadcast "
-        "coverage started this morning; call volume to support is up 900%.",
-    ),
-    (
-        "press",
-        "Day 10 - First fatality and litigation.\n"
-        "A 71-year-old patient in Ohio has died; the health department links "
-        "the death to the outbreak strain. A class action was filed this "
-        "morning naming HappyTuna and the Cebu plant operator. Case count "
-        "stands at 63. The stock is down 31% since Day 7, a Senate committee "
-        "has requested testimony, and our third largest retailer has delisted "
-        "the brand indefinitely.",
-    ),
-]
+from langchain_ollama import ChatOllama
+
+llm = ChatOllama(model="gemma4:e2b", temperature=0.9)
+system_msg = ("You are an event generator."
+              "Backstory: There is a tuna company called HappyTuna that is goes through a Salmonella outbreak crisis with their product."
+              "There are 6 stages to this narrative, and they are as follows:"
+              "1. PRE-CRISIS: The company is operating normally, and there are no known issues with the product. The product is being sold and enjoyed without incident."
+              "2. START: Faint signs of a problem begin to appear, but the company is unaware of the issue. The product is still being sold and consumed."
+              "3. SPREAD: Customers experience recurring issues with the product, and the company begins to receive complaints. The issue is still not fully understood, and the product continues to be sold."
+              "4. EXPOSURE: Major bad experiences occur with customers, stores, factory workers, or the company's lab. The issue is now widely known, and the company is under scrutiny."
+              "5. CRISIS: The public, authorities, and the company react to the crisis. The company may face lawsuits, recalls, and negative publicity. Whilst Salmonella spreads rapidly decreases in the background due to the company's efforts to contain it."
+              "6. RESOLUTION: The Salmonella outbreak is fully contained, and the company takes steps to prevent future incidents. The company may face long-term consequences, but the crisis is resolved.")
 
 
-def generate(event: Event, delay: float = 0.0):
+# def generate(event: Event ,delay: float = 0.2):
+def generate(delay: float = 0.2):
     """Emits the crisis feed through the broker, one event at a time.
 
     `delay` puts a pause between events so a live demo can be followed at
     reading speed; leave it at 0 for tests.
     """
-    for tag, text in CRISIS_FEED:
-        event.emit(tag, text)
+    # for tag, text in CRISIS_FEED:
+    #     event.emit(tag, text)
+    #     if delay:
+    #         time.sleep(delay)
+
+    ## loop over all stages, in each one do  5 customer events -> 1 press event
+    for i in range(6):
+        for j in range(5):
+            ## build 5 prompts for customer events
+            stage = {0: "PRE-CRISIS", 1: "START", 2: "SPREAD", 3: "EXPOSURE", 4: "CRISIS", 5: "RESOLUTION"}
+            customer_event_description = "Generate one plausible customer event that happens DURING THE " + stage[i] + " STAGE ONLY. The event should be 3-5 lines long, The event should be written in a way that is consistent with the narrative of the crisis. You MUST NOT invent actions on behalf of HappyTuna."
+
+            messages = [
+                ("system", system_msg),
+                ("human", str(customer_event_description)),
+            ]
+
+            print("\n--- Customer event generation for stage "+ stage[i] + " ----")
+            response = llm.invoke(messages)
+            print(response.content)
+
+            # emit response content to relevant event listeners
+            event.emit("customer", response.content)
+            
+            if delay:
+                time.sleep(delay)
+
+
+        ## build one prompt for press event
+        press_event_description = "Generate one plausible press event that happens DURING THE " + stage[i] + " STAGE ONLY. The event should be 5-15 lines long, The event should be written in a way that is consistent with the narrative of the crisis. You MUST NOT invent actions on behalf of HappyTuna."
+
+        messages = [
+            ("system", system_msg),
+            ("human", str(customer_event_description)),
+        ]
+
+        print("\n--- Press event generation for stage "+ stage[i] + " ----")
+        response = llm.invoke(messages)
+        print(response.content)
+
+        # emit response content to relevant event listeners
+        # event.emit("press", response.content)
+        
         if delay:
             time.sleep(delay)
+
+
+if __name__ == "__main__":
+    print("Hello")
+    generate()
