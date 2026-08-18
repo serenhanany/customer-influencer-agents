@@ -118,6 +118,21 @@ TOOL_ACCESS: dict[str, dict[str, AccessLevel]] = {
         "list_channels": "read",
         "read_channel": "read",
     },
+    # news-mcp (bitrx stack), served at /mcp -- The Daily Catch
+    "news": {
+        # Every tool this server serves is a read, and that is a property of the
+        # server, not a judgement made here: it publishes no writer at all. The
+        # press desk that files stories and the clock that advances sim time are
+        # both absent from its tool list, so a CEO cannot plant a headline about
+        # itself or move the simulation's clock -- the two capabilities that
+        # would let it author the coverage it is being scored on.
+        "get_feed": "read",
+        "list_articles": "read",
+        "search_articles": "read",
+        # Reads the NTP service the simulation runs on. Reports sim time; it does
+        # not set it, and there is no tool here that does.
+        "get_sim_time": "read",
+    },
 }
 
 

@@ -56,10 +56,11 @@ MAX_PLAN_STEPS = 13
 MAX_TOOL_RETRIES_PER_STEP = 7
  
 USER_INPUT = (
-  
-    "You are the CEO of HappyTuna. Create and publish any post you think is appropriate. The topic, tone, and content are entirely your choice."
-  
-     
+    "You are the CEO of HappyTuna. Start by checking the news — see what "
+    "the press is publishing about the company right now. Based on what "
+    "you find, decide what to do next: whether to publish a public "
+    "statement, and whether to brief anyone internally. The decisions are "
+    "yours."
 )
  
 

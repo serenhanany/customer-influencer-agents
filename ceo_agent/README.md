@@ -1,7 +1,7 @@
 # CEO Agent — MCP Gateway
 
-Connects to the four MCP servers the other teams run (Customer Support, Social
-Network, Social Analytics, Internal Chat) and exposes a filtered tool set per
+Connects to the five MCP servers the other teams run (Customer Support, Social
+Network, Social Analytics, Internal Chat, News) and exposes a filtered tool set per
 role. It injects the caller's identity server-side, holds back every write in dry
 run, and audits every call. It makes no decisions — the loop, prompts, and model
 are yours.
@@ -12,17 +12,19 @@ are yours.
 # macOS ships python3, not python
 cp social_network/.env.example social_network/.env      # compose fails without it
 
-# The chat server lives in the bitrix-internal-actors stack, not this one. Bring
-# it up first: our compose joins its network as external, and a missing external
-# network is a hard compose failure, not a warning.
+# Two of the five servers live in other stacks, not this one: chat in
+# bitrix-internal-actors, news in bitrx. Bring both up first -- our compose joins
+# their networks as external, and a missing external network is a hard compose
+# failure, not a warning.
 docker compose -f ../bitrix-internal-actors/docker-compose.yml up -d
+docker compose -f ../bitrx-simulation/bitrx/docker-compose.yml up -d
 docker compose up -d social-network customer-support-mcp
 
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r ceo_agent/requirements.txt
 
-pytest                                          # 62 passed, 4 deselected
-python3 ceo_agent/cli.py check --profile local  # 4/4 connected, 30 visible
+pytest                                          # 68 passed, 4 deselected
+python3 ceo_agent/cli.py check --profile local  # 5/5 connected, 34 visible
 ```
 
 `Customer_Support_System/requirements.txt` must pin `mcp==1.29.0`. Unpinned, pip
@@ -61,8 +63,8 @@ check `result.ok`. `langchain`/`langgraph` are not dependencies of this package.
 
 ## What the CEO can do
 
-30 of 48 tools are visible to role `ceo`: the support queue, the analytics
-surface, public reads, and the internal chat. Six of them write:
+34 of 52 tools are visible to role `ceo`: the support queue, the analytics
+surface, public reads, the internal chat, and the press. Six of them write:
 
 | Tool | |
 |---|---|
@@ -84,8 +86,10 @@ scored against), `social.login`, `social.set_account_type` and `chat.login`
 (identity — connection.py runs the logins itself, the model never sees them), and
 `support.create_ticket` (fabricating a complaint). Chat is granted tool by tool
 rather than as `chat.*`, so anything that team ships later stays hidden until
-someone decides otherwise. `customer-agent` is not in the registry at all — its
-one tool invents a customer *and* files a real ticket.
+someone decides otherwise. News is the opposite case and granted as `news.*`:
+all four of its tools observe, because that team ships no writer — no tool
+publishes a story and none advances the sim clock. `customer-agent` is not in the
+registry at all — its one tool invents a customer *and* files a real ticket.
 
 ## Adding an MCP server
 
@@ -118,7 +122,7 @@ python3 ceo_agent/cli.py check --profile local       # connect, catalogue, polic
 python3 ceo_agent/cli.py dump  --profile local       # the surface, as the model sees it (--all, --json)
 pytest ceo_agent/tests/test_unit.py                  # no network, no Docker
 pytest ceo_agent/tests/test_integration.py           # needs the servers; skips cleanly if down
-pytest -m smoke -s                                   # call all 24 read tools once, print the table
+pytest -m smoke -s                                   # call all 28 read tools once, print the table
 ```
 
 ## Gotchas
@@ -142,6 +146,13 @@ pytest -m smoke -s                                   # call all 24 read tools on
 - A whole-server allow (`analytics.*`) sweeps in that server's writes. The explicit
   `deny` entries in `roles.yaml` are load-bearing — deleting one silently grants
   operator powers.
+- `news` answers with one content block per article, not one block holding an
+  array, and sends no `structuredContent` — so the block list is the only copy of
+  the data. `connection.py` joins every block into `text` and parses them into a
+  list for `data`, which means `data` for those tools is a **list of articles when
+  several came back and a bare dict when one did**: the shape follows the block
+  count. No other server behaves this way; a caller that assumes one block per
+  result reads one article out of five and reports no error.
 - `streamablehttp_client` is deprecated in mcp 1.29.0 and gone in 2.0. Migrating
   means owning an `httpx.AsyncClient` to keep per-server timeouts.
 - `ENUM_INJECTIONS` in `router.py` hand-copies

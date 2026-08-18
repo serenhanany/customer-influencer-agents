@@ -182,10 +182,43 @@ def failure_hint(exc: BaseException, cfg: ServerConfig) -> str | None:
     return None
 
 
-def _text_of(raw: CallToolResult) -> str | None:
-    """Joins the text content blocks of a tool result."""
-    chunks = [block.text for block in raw.content if getattr(block, "type", None) == "text"]
-    return "\n".join(chunks) if chunks else None
+def _text_blocks(raw: CallToolResult) -> list[str]:
+    """Every text content block of a tool result, in the order the server sent them."""
+    return [block.text for block in raw.content if getattr(block, "type", None) == "text"]
+
+
+def _parse_payload(blocks: Sequence[str]) -> Any | None:
+    """The JSON value a result carries, across however many blocks it arrived in.
+
+    MCP lets a tool answer with a *list* of content blocks, and the servers
+    disagree on how to use it. Four of the five put the whole response -- arrays
+    included -- in a single block. The news server puts one article per block:
+    `get_feed(limit=5)` comes back as three blocks for three articles, and its
+    `structuredContent` is empty, so the blocks are the only copy of the data.
+
+    Hence block-by-block parsing, returned as a list. The joined text cannot be
+    parsed as a whole, because it is not one JSON document -- two objects
+    separated by a newline is two documents and `json.loads` rejects the pair.
+    Parsing the join would leave `data` at None for every list the news server
+    returns, which reads exactly like a broken server and sends whoever chases it
+    to the wrong layer.
+
+    GOTCHA -- the shape follows the block count, which follows the row count:
+    a one-article `get_feed` is one block and comes back as a bare dict, while a
+    three-article one comes back as a list of three. A caller iterating `data`
+    for that server must handle both. Single blocks are deliberately *not*
+    wrapped: that is the shape every existing caller reads, and wrapping would
+    silently re-shape four servers' payloads to fix a fifth.
+
+    Returns None if any block is not JSON. The raw text is still in `text`.
+    """
+    if not blocks:
+        return None
+    try:
+        values = [json.loads(block) for block in blocks]
+    except (json.JSONDecodeError, ValueError):
+        return None  # Not every tool returns JSON; the raw text is still in `text`.
+    return values[0] if len(values) == 1 else values
 
 
 async def call_tool(
@@ -215,13 +248,13 @@ async def call_tool(
             elapsed_ms=(time.perf_counter() - started) * 1000,
         )
 
-    text = _text_of(raw)
-    data: Any | None = None
-    if text is not None:
-        try:
-            data = json.loads(text)
-        except (json.JSONDecodeError, ValueError):
-            data = None  # Not every tool returns JSON; the raw text is still in `text`.
+    # Both come from the same block list: a tool that answers in several blocks
+    # must not lose all but the first in either field. A result with no content
+    # blocks at all -- how news reports a search that matched nothing -- leaves
+    # both None, which is not an error and must not be turned into one.
+    blocks = _text_blocks(raw)
+    text = "\n".join(blocks) if blocks else None
+    data = _parse_payload(blocks)
 
     return ToolResult(
         qualified_name=qualified_name,

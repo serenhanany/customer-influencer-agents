@@ -44,9 +44,9 @@ pytestmark = pytest.mark.integration
 # things here that need updating when a server is added or a team ships a tool --
 # see the invariant tests below, which never do. A failure here is either an
 # upstream change worth knowing about, or an intended change worth recording.
-RECORDED_SERVERS = 4
-RECORDED_TOOLS = 48
-RECORDED_VISIBLE = 30
+RECORDED_SERVERS = 5
+RECORDED_TOOLS = 52
+RECORDED_VISIBLE = 34
 RECORDED_HIDDEN = RECORDED_TOOLS - RECORDED_VISIBLE  # 18
 
 
@@ -203,6 +203,31 @@ async def test_a_real_read_succeeds(router):
     assert result.elapsed_ms > 0
 
 
+async def test_a_multi_block_result_arrives_whole(router):
+    """The live half of the multi-block tests in test_unit.py.
+
+    news is the only server that answers with one content block per row, so it is
+    the only place the join in connection.py is exercised for real. The unit tests
+    prove the normalisation; this proves the server still behaves the way those
+    tests assume -- if that team switches to a single block holding an array, this
+    keeps passing and the fixtures upstream are the thing that went stale.
+
+    Read-only and cheap, so it runs by default rather than behind the smoke marker.
+    """
+    result = await router.call_tool("news.get_feed", {"limit": 5})
+
+    assert result.ok is True, result.error
+    if result.data is None:
+        pytest.skip(f"no articles in the live feed: {result.text!r}")
+
+    # One article is a bare dict, several are a list -- the shape follows the
+    # block count. See _parse_payload in connection.py.
+    articles = result.data if isinstance(result.data, list) else [result.data]
+    assert all(isinstance(a, dict) and a.get("id") for a in articles), result.data
+    # Every article reached `text` too, not merely the first block.
+    assert result.text.count('"id"') == len(articles)
+
+
 async def test_denied_call_returns_failure_and_never_dispatches(router, tmp_path):
     result = await router.call_tool("analytics.run_analysis", {})
 
@@ -291,7 +316,7 @@ def test_get_status_reports_every_configured_server(router):
     statuses = router.get_status()
 
     assert len(statuses) == RECORDED_SERVERS
-    assert {s.server_id for s in statuses} == {"support", "analytics", "social", "chat"}
+    assert {s.server_id for s in statuses} == {"support", "analytics", "social", "chat", "news"}
 
 
 # ---------------------------------------------------------------------------
@@ -367,6 +392,11 @@ SMOKE_LITERAL_ARGS: dict[str, dict[str, Any]] = {
     "analytics.search": {"q": "tuna"},
     "social.search": {"q": "tuna"},
     "analytics.get_hashtag_posts": {"tag": "tuna"},
+    # Belongs here rather than among the resolved ids for the same reason as
+    # get_hashtag_posts: a query matching nothing is a successful call. News
+    # answers one with zero content blocks and no error, which the gateway
+    # reports as ok with text and data both None.
+    "news.search_articles": {"q": "recall"},
 }
 
 
@@ -458,7 +488,7 @@ async def _resolve_smoke_args(router) -> tuple[dict[str, dict[str, Any]], dict[s
 
 @pytest.mark.smoke
 async def test_every_read_tool_responds(router):
-    """Calls all 24 read tools on the CEO's surface and reports which answered."""
+    """Calls all 28 read tools on the CEO's surface and reports which answered."""
     reads = sorted((e for e in router.get_tools() if e.access == "read"),
                    key=lambda e: e.qualified_name)
     assert reads, "no read tools are visible to the CEO"

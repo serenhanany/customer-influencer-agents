@@ -87,7 +87,17 @@ volumes:
 # Requires that stack to be up: `docker compose -f ../bitrix-internal-actors/
 # docker-compose.yml up -d`. An external network that does not exist is a hard
 # compose failure, not a warning.
+#
+# The news MCP server (mcp_servers.yaml: id `news`) is the same story again, on a
+# third stack: it is `bitrx-news-mcp` in the `bitrx` project, already answering to
+# the alias `news-mcp` on that stack's network, and it reads its clock from that
+# stack's NTP service. Same reasoning, same shape -- join the network, do not
+# duplicate the service. Nothing here attaches to either network yet; both are
+# declared so the `docker` URLs in mcp_servers.yaml name something real.
 networks:
   chat:
     name: bitrix-internal-actors_default
+    external: true
+  news:
+    name: bitrx_bitrx
     external: true

@@ -98,8 +98,12 @@ class ToolResult(BaseModel):
     reported, while `ok` is also False for a timeout or a dropped connection,
     where the server reported nothing at all. Callers check `ok`.
 
-    `data` is the JSON payload exactly as sent, unwrapped -- the three servers
-    disagree on shape and normalising that is not this layer's decision.
+    `data` is the JSON payload exactly as sent, unwrapped -- the servers disagree
+    on shape and normalising that is not this layer's decision. One exception,
+    forced by MCP itself: a result that arrives as several content blocks (news
+    sends one article per block) is parsed block by block into a list, since the
+    blocks concatenated are not a single JSON document. See `_parse_payload` in
+    connection.py for why a single block stays unwrapped.
     """
 
     model_config = ConfigDict(extra="forbid")

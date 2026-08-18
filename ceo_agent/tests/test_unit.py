@@ -9,13 +9,15 @@ this file needs a server to be up, it is in the wrong file.
 from __future__ import annotations
 
 import copy
+import json
 import logging
 
 import pytest
-from mcp.types import ListToolsResult, Tool
+from mcp.types import CallToolResult, ListToolsResult, TextContent, Tool
 
 from gateway.catalog import CatalogError, TOOL_ACCESS, build_catalog, qualify
-from gateway.models import ToolEntry
+from gateway.connection import call_tool
+from gateway.models import ServerConfig, ToolEntry
 from gateway.policy import PolicyError, build_policy, load_roles
 from gateway.registry import RegistryError, load_registry
 from gateway.router import Router, prepare_schema, to_langchain_name
@@ -359,6 +361,114 @@ async def test_colliding_names_stay_distinct(monkeypatch):
     assert len(catalog) == 2
     assert "post_id" in catalog.get("social.get_post").input_schema["properties"]
     assert "id" in catalog.get("analytics.get_post").input_schema["properties"]
+
+
+# ---------------------------------------------------------------------------
+# connection: normalising a tool result
+# ---------------------------------------------------------------------------
+#
+# MCP returns a *list* of content blocks and the servers disagree on how to use
+# it. Support, social, analytics and chat all put a whole response -- arrays
+# included -- in one block, so nothing else in this suite exercises more than a
+# single block. News puts one article per block with an empty structuredContent,
+# which makes the block list the only copy of the data: read only the first and
+# get_feed silently returns one article out of five, with no error anywhere to
+# say so. These are the tests for that path.
+
+
+def text_result(*texts: str, is_error: bool = False) -> CallToolResult:
+    """A tool result carrying one text content block per argument."""
+    return CallToolResult(
+        content=[TextContent(type="text", text=t) for t in texts],
+        isError=is_error,
+    )
+
+
+class FakeCallSession:
+    """Just enough ClientSession to answer one `call_tool` with a canned result."""
+
+    def __init__(self, result: CallToolResult) -> None:
+        self._result = result
+        self.calls: list[tuple[str, dict]] = []
+
+    async def call_tool(self, name: str, args: dict) -> CallToolResult:
+        self.calls.append((name, args))
+        return self._result
+
+
+NEWS_CONFIG = ServerConfig(id="news", url="http://localhost:8004/mcp")
+
+ARTICLES = [
+    {"id": "a1", "title": "Recall widens", "category": "breaking"},
+    {"id": "a2", "title": "Regulators tighten rules", "category": "investigative"},
+    {"id": "a3", "title": "Line B expansion", "category": "update"},
+]
+
+
+async def test_every_block_of_a_multi_block_result_reaches_text_and_data():
+    """The news shape: one article per block, and none of them may be dropped."""
+    session = FakeCallSession(text_result(*(json.dumps(a) for a in ARTICLES)))
+
+    result = await call_tool(session, NEWS_CONFIG, "get_feed", {"limit": 5})
+
+    assert result.ok is True
+    # Parsed: all three articles, in the order the server sent them.
+    assert result.data == ARTICLES
+    # And the raw text carries all three too, not just the first.
+    for article in ARTICLES:
+        assert article["title"] in result.text
+    assert result.text.count('"id"') == 3
+
+
+async def test_a_single_block_payload_is_not_wrapped_in_a_list():
+    """The regression guard for the other four servers.
+
+    They answer with one block holding the whole array. Wrapping that to make
+    the news case uniform would re-shape every payload the agent already reads.
+    """
+    posts = [{"id": "p1"}, {"id": "p2"}]
+    session = FakeCallSession(text_result(json.dumps(posts)))
+
+    result = await call_tool(session, ServerConfig(id="social", url="http://x/mcp"),
+                             "get_global_feed", {})
+
+    assert result.data == posts  # the array itself, not [array]
+
+
+async def test_multi_block_text_is_joined_even_when_it_is_not_json():
+    """`data` gives up on unparseable content; `text` must still be complete."""
+    session = FakeCallSession(text_result("first line", "second line"))
+
+    result = await call_tool(session, NEWS_CONFIG, "get_feed", {})
+
+    assert result.ok is True
+    assert result.text == "first line\nsecond line"
+    assert result.data is None
+
+
+async def test_a_result_with_no_content_blocks_is_not_an_error():
+    """How news reports a search that matched nothing: zero blocks, no error."""
+    session = FakeCallSession(text_result())
+
+    result = await call_tool(session, NEWS_CONFIG, "search_articles", {"q": "nothing"})
+
+    assert result.ok is True
+    assert result.is_error is False
+    assert result.text is None
+    assert result.data is None
+    assert result.error is None
+
+
+async def test_a_multi_block_error_reports_every_block():
+    """An error split across blocks must not be reported by its first line alone."""
+    session = FakeCallSession(text_result("Error 400:", "limit must be positive",
+                                          is_error=True))
+
+    result = await call_tool(session, NEWS_CONFIG, "get_feed", {"limit": -1})
+
+    assert result.ok is False
+    assert result.is_error is True
+    assert result.error == "Error 400:\nlimit must be positive"
 
 
 # ---------------------------------------------------------------------------

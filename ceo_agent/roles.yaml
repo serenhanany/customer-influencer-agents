@@ -94,6 +94,24 @@ roles:
       - "chat.create_channel"
       - "chat.add_member"
 
+      # The press. Read-only in the strongest sense available: not "only the
+      # reads were granted", but "there is nothing else to grant". That server
+      # exposes four tools and all four observe -- publishing a story and
+      # advancing the simulation clock were both left off its tool list by the
+      # team that owns it, so no allow entry here could reach them and no deny
+      # entry below would have anything to bite on.
+      #
+      # A wildcard rather than four names, unlike chat directly above, and the
+      # difference is deliberate. Chat is named tool by tool because that team
+      # ships writes, so a future one would otherwise arrive already granted.
+      # Reading the news can neither fabricate the public the CEO is judged on
+      # nor touch the instruments measuring it -- it is the CEO seeing what is
+      # being said about the company, which is the thing under study. And a
+      # write added there later cannot slip through this wildcard unnoticed:
+      # TOOL_ACCESS has no entry for it, and an unclassified tool aborts the
+      # catalog build rather than reaching the agent.
+      - "news.*"
+
       # Removed: "social.get_top_influencers" -- no such tool. get_top_influencers
       # is served by analytics, not social, and the "analytics.*" entry above
       # already grants it. Left recorded here because the intent was right and

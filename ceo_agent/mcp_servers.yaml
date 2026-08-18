@@ -78,3 +78,25 @@ servers:
       tool: login
       args:
         agent_id: CEO-1
+
+  - id: news
+    enabled: true
+    timeout_seconds: 30.0
+    urls:
+      # Same situation as chat, a second stack: the container is `bitrx-news-mcp`
+      # in the separate `bitrx` project, and it answers to the alias `news-mcp`
+      # on that stack's network. Our docker-compose.yml joins that network as
+      # external, so the name below resolves for a containerized gateway; the
+      # gateway runs from the host today, so in practice this connects under
+      # GATEWAY_URL_PROFILE=local.
+      docker: http://news-mcp:8004/mcp
+      local: http://localhost:8004/mcp
+    # No login: every tool is a read and none of them 401s. Nothing to replay on
+    # reconnect, so no post_login_setup either.
+    #
+    # SHAPE: its list tools answer with one content block per article rather than
+    # one block holding an array -- get_feed(limit=5) is three blocks for three
+    # articles -- and structuredContent is empty, so the blocks are the only copy
+    # of the data. connection.py's _parse_payload handles this; nothing here has
+    # to. Noted because no other server in this file behaves that way, and a
+    # reader comparing entries would otherwise assume they are interchangeable.
