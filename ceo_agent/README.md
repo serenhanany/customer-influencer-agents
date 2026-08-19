@@ -25,6 +25,10 @@ are yours.
    ```bash
    docker compose up --build
    ```
+5. run the terminal in bitrx (news website) file and run the docker compose (Keep the servers running all the time) :
+   ```bash
+   docker compose up --build
+   ```   
 6. run main.py in ceo_agent file :
    ```bash
    python main.py
