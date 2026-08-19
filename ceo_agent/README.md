@@ -6,6 +6,30 @@ role. It injects the caller's identity server-side, holds back every write in dr
 run, and audits every call. It makes no decisions — the loop, prompts, and model
 are yours.
 
+## How to run the CEO
+1. Add your `.env` file to be contain :
+   ```bash
+   GEMINI_API_KEY=YOUR_GEMINI_API_KEY
+   GEMINI_MODEL_NAME=gemini-2.5-flash
+   GEMINI_EMBEDDING_MODEL=models/gemini-embedding-001
+   GEMINI_TEMPERATURE=0.7
+   NVIDIA_API_KEY=YOUR_NVIDIA_API_KEY
+   NVIDIA_BASE_URL=YOUR_NVIDIA_BASE_URL
+   ```
+2. Create the Python interpreter (`.venv` folder) and install the requirement.
+3. run the terminal in customer-influencer-agents file and run the docker compose (Keep the servers running all the time) :
+   ```bash
+   docker compose up --build
+   ```
+4. run the terminal in internal-chat file and run the docker compose (Keep the servers running all the time) :
+   ```bash
+   docker compose up --build
+   ```
+6. run main.py in ceo_agent file :
+   ```bash
+   python main.py
+   ```
+
 ## Setup
 
 ```bash
