@@ -10,7 +10,7 @@ Becoming a subscriber is one loop:
 Pass several tags to follow more than one channel, or none to receive
 everything:
 
-    async for event in subscribe("press", "regulator"):
+    async for event in subscribe("press", "customer"):
         ...
 
 Everything the transport needs - the no-read-timeout setting, skipping keepalive

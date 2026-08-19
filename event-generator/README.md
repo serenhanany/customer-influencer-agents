@@ -36,7 +36,7 @@ react to a crisis can live in completely separate services.
                                         └─┬───────────────┬───────────────┬─┘
                                           ▼               ▼               ▼
                                     CEO agent      customer agent   example_subscriber.py
-                                    (regulator)    (social)         (press)
+                                    (press)        (customer)       (press)
 ```
 
 `event_broker.py` is a plain in-process pub/sub — `subscribe()` holds a Python function and
@@ -51,12 +51,12 @@ by the HTTP layer and stays usable directly for in-process callers and tests.
        │
        ▼
   worker thread ──────► Event.emit("press", envelope)
-  (generate() sleeps,          │
+  (replay() sleeps,            │
    so it can't run on          ├──► listener A  ─── call_soon_threadsafe ──┐
    the event loop)             │    (tag=press)                            │
                                │                                           ▼
                                ├──► listener B  ── not subscribed ── skip   event loop
-                               │    (tag=social)                            │
+                               │    (tag=customer)                          │
                                └──► listener C  ─── call_soon_threadsafe ──┤
                                     (tag=press)                            ▼
                                                                    asyncio.Queue
@@ -67,7 +67,7 @@ by the HTTP layer and stays usable directly for in-process callers and tests.
 
 Two details that matter if you change this code:
 
-- **`generate()` is synchronous and sleeps between events**, so `/replay` runs it on a worker
+- **`replay()` is synchronous and sleeps between events**, so `/replay` runs it on a worker
   thread. That means `emit()` fires off-loop while subscriber queues live on the loop — pushes go
   through `loop.call_soon_threadsafe`, never a bare `put_nowait`.
 - **`seq` is stamped once per event, not once per subscriber.** Two clients watching the same
@@ -126,15 +126,24 @@ closed by intermediaries; ignore any line that doesn't start with `data:`.
 
 ### The scripted feed
 
-Five briefings escalating a salmonella outbreak, in `event_generator.py`:
+`CRISIS_FEED` in `event_generator.py` — twelve events walking a salmonella outbreak through six
+stages, one `customer` and one `press` event each:
 
-| # | Tag | Event |
+| Stage | `customer` | `press` |
 |---|---|---|
-| 1 | `social` | Day 1 — social listening alert, 14 posts, lot HT-4471-B named |
-| 2 | `press` | Day 3 — local news pickup, 12 confirmed illnesses |
-| 3 | `regulator` | Day 5 — FDA investigation opened, strain matches patient isolates |
-| 4 | `press` | Day 7 — nationwide recall, 1.2M cans, retailers pulling all SKUs |
-| 5 | `press` | Day 10 — first fatality, class action, stock down 31% |
+| PRE-CRISIS | Routine purchase, no incident | Trade weekly notes volumes up 4% |
+| START | Swollen can seam noticed, dismissed | County summary: 9 cases vs average of 4 |
+| SPREAD | Child ill after a tuna sandwich | State confirms an 11-case cluster |
+| EXPOSURE | Store staff recall unlogged dented cases | Lab links 19 isolates to a retained can |
+| CRISIS | 90 minutes on hold, no answer | Law firms review claims; chains pull stock |
+| RESOLUTION | Long-time buyer switches brands for now | Outbreak declared over, 31 cases, no deaths |
+
+Two tags, `customer` and `press` — the same two `generate()` emits, so a subscriber written against
+one mode works against the other.
+
+**`/replay` plays this scripted feed, never the model.** That keeps the debugging path free,
+instant and identical every run. `generate()` is the LLM path (24 calls, ~1 minute); it is
+deliberately not wired to an endpoint so a stray `curl` can't spend a minute of model time.
 
 ---
 
@@ -153,8 +162,8 @@ That is the whole integration. Pass several tags to follow more than one channel
 receive everything:
 
 ```python
-async for event in subscribe("press", "regulator"):   # two channels
-async for event in subscribe():                        # everything
+async for event in subscribe("press", "customer"):   # two channels
+async for event in subscribe():                      # everything
 ```
 
 Each `event` is a frozen dataclass with `.tag`, `.text`, `.seq` and `.ts`.
@@ -163,9 +172,9 @@ The client is async because the agents are — `ModularAgent.run()` is `async de
 async, so you can await your model and tool calls straight inside the loop:
 
 ```python
-async for event in subscribe("regulator"):
+async for event in subscribe("press"):
     await agent.run(WorldEvent(
-        type="regulatory_notice",
+        type="press_briefing",
         source="event-generator",
         payload={"text": event.text},
     ))
@@ -229,7 +238,7 @@ blocking the read loop.
 | File | |
 |---|---|
 | `event_broker.py` | `Event` — in-process pub/sub keyed by tag |
-| `event_generator.py` | `CRISIS_FEED` + `generate()` — the scripted crisis |
+| `event_generator.py` | `CRISIS_FEED` + `replay()` — the scripted crisis; `generate()` — the LLM path |
 | `server.py` | FastAPI app: SSE fan-out, `/emit`, `/replay` |
 | `event_client.py` | `subscribe()` — what agents import to listen |
 | `example_subscriber.py` | Working listener; the template to copy |

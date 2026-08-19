@@ -43,10 +43,9 @@ async def main() -> None:
     logging.getLogger("httpx").setLevel(logging.WARNING)
     print(f"Listening on tag '{TAG}'. Ctrl+C to stop.\n", flush=True)
 
-    # Only "press" is subscribed, so this sees the Day 3, Day 7 and Day 10
-    # briefings. The "social" and "regulator" events are still emitted, they
-    # just aren't routed here. Pass more tags to follow several: subscribe(
-    # "press", "social").
+    # Only "press" is subscribed, so this sees the six press briefings. The
+    # "customer" events are still emitted, they just aren't routed here. Pass
+    # more tags to follow several: subscribe("press", "customer").
     async for event in subscribe(TAG):
         await press_agent(event.text)
 

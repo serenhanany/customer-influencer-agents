@@ -31,7 +31,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from event_broker import Event
-from event_generator import CRISIS_FEED, generate
+from event_generator import CRISIS_FEED, replay as replay_feed
 
 # A slow subscriber must not grow its backlog without limit. At this depth we
 # start dropping the oldest event rather than the newest, so a client that falls
@@ -142,11 +142,16 @@ async def emit(request: EmitRequest) -> dict:
 async def replay(delay: float = 2.0) -> dict:
     """Play the scripted crisis feed once, in the background.
 
-    `generate()` is synchronous and sleeps between events, so it runs on its own
-    thread - awaiting it here would block every other request for the duration.
+    Scripted on purpose: this is the debugging path, so it must stay free and
+    repeatable. `event_generator.generate()` is the LLM path and is deliberately
+    not wired to an endpoint - a stray curl should never cost 24 model calls.
+
+    `replay_feed()` is synchronous and sleeps between events, so it runs on its
+    own thread - awaiting it here would block every other request for the
+    duration.
     """
     threading.Thread(
-        target=generate, args=(sequencer,), kwargs={"delay": delay}, daemon=True
+        target=replay_feed, args=(sequencer,), kwargs={"delay": delay}, daemon=True
     ).start()
     return {"status": "replaying", "events": len(CRISIS_FEED), "delay": delay}
 
