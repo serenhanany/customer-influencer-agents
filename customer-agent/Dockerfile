@@ -2,7 +2,7 @@ FROM python:3.11-slim
 WORKDIR /app
 
 COPY pyproject.toml .
-COPY register.py personas.py system_prompt.py ./
+COPY register.py personas.py system_prompt.py event_client.py driver.py main.py ./
 COPY personas.yaml workflow.yml ./
 COPY guardrails_config ./guardrails_config
 
@@ -21,9 +21,8 @@ ENV PERSONAS_CONFIG_PATH=/app/personas.yaml
 
 EXPOSE 8000
 
-# --tool_names restricts what's exposed via MCP to just our own agent
-# tool (customer_agent_react). Without it, nat also tries to expose the
-# Customer Support tools discovered through our MCP function group,
-# which are already served directly by the Customer Support MCP server
-# and don't resolve correctly through this path.
-CMD ["nat", "mcp", "serve", "--config_file", "workflow.yml", "--host", "0.0.0.0", "--port", "8000", "--tool_names", "customer_agent_react"]
+# main.py starts "nat mcp serve" itself (as a subprocess, with the same
+# --tool_names restriction previously set here directly -- see main.py's
+# docstring) and, in this process, driver.py's event-generator loop that
+# makes the agent react on its own instead of purely on demand.
+CMD ["python", "main.py"]

@@ -12,10 +12,11 @@ dependencies = [
     "nvidia-nat-mcp",
     "nemoguardrails",
     "pyyaml",
+    "httpx",
 ]
 
 [tool.setuptools]
-py-modules = ["register", "personas", "system_prompt"]
+py-modules = ["register", "personas", "system_prompt", "event_client", "driver", "main"]
 
 # This is the piece that makes the "nat" CLI auto-discover our custom
 # customer_agent_decision function type at startup -- without this entry
