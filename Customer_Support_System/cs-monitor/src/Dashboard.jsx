@@ -12,7 +12,7 @@ import {
   MessageSquareReply, Zap, Clock,
 } from "lucide-react";
 
-const BASE_URL = "http://localhost:8003";
+const BASE_URL = "http://localhost:8013";
 
 // ============================================================
 // 1. CONSTANTS + HELPERS
