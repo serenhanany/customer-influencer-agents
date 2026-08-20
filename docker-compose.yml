@@ -30,7 +30,7 @@ services:
     build: ./Customer_Support_System
     container_name: customer-support-api
     ports:
-      - "8003:8001"
+      - "8013:8001"
     volumes:
       - customer_support_data:/app/data
     environment:
