@@ -34,3 +34,13 @@ class LlmClient:
 
     def invoke(self, message: list[BaseMessage]) -> str:
         return self._parser.invoke(self._llm.invoke(message))
+
+    def invoke_with_tools(self, messages: list[BaseMessage], tools: list[dict[str, Any]]) -> AIMessage:
+        """Invokes the model bound to `tools` via native function calling.
+
+        Returns the raw AIMessage so callers can read `.tool_calls` directly
+        instead of asking the model to hand-write a JSON action and parsing
+        it back out of free text.
+        """
+        return self._llm.bind_tools(tools).invoke(messages)
+    
