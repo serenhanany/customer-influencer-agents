@@ -31,6 +31,7 @@ not registered.
 Run with:  python main2.py   (from ceo_agent/)
 """
 import json
+import logging
 import os
 import sys
 import urllib.error
@@ -38,6 +39,13 @@ import urllib.request
 from pathlib import Path
 
 from dotenv import load_dotenv
+
+# Both the google-genai SDK and langchain_google_genai log harmless
+# advisory warnings on every call (AFC usage, unsupported schema keys
+# like "$schema" from pydantic tool schemas). They're noise here, not
+# actionable, so raise the threshold instead of suppressing all logging.
+logging.getLogger("google_genai").setLevel(logging.ERROR)
+logging.getLogger("langchain_google_genai").setLevel(logging.ERROR)
 
 # Windows consoles often default stdout/stderr to a codepage (e.g. cp1252)
 # that can't encode emoji -- and the CEO's LLM-drafted social posts routinely
