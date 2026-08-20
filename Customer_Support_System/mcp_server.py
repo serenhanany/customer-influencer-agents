@@ -17,7 +17,7 @@ reach it over the network (stdio transport only works for local
 parent/child process pairs, not cross-container calls).
 """
 import os
-from typing import Optional
+from typing import List, Optional, Union
 
 from mcp.server.fastmcp import FastMCP
 
@@ -94,7 +94,7 @@ def get_ticket(ticket_id: str) -> dict:
 def list_tickets(
     customer_id: Optional[str] = None,
     status: Optional[str] = None,
-    issue_type: Optional[str] = None,
+    issue_type: Optional[Union[str, List[str]]] = None,
     linked_product_batch: Optional[str] = None,
 ) -> dict:
     """List tickets, optionally filtered. All filters are optional and combinable.
@@ -103,8 +103,10 @@ def list_tickets(
         customer_id: Only tickets filed by this customer.
         status: One of: open, in_progress, escalated, resolved, closed.
         issue_type: One of: quality, delivery, billing, general, safety_concern.
+        Pass a single value, or a list of values to match any of
+        them -- e.g. ["quality", "safety_concern"] returns tickets of either type.
         linked_product_batch: Only tickets referencing this batch number --
-            useful for checking how many complaints exist about a specific batch.
+        useful for checking how many complaints exist about a specific batch.
 
     Returns:
         An object with "count" and "tickets" (a list of matching tickets,
