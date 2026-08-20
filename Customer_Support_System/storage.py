@@ -254,7 +254,7 @@ def get_ticket(ticket_id: str) -> Optional[Ticket]:
 def list_tickets(
     customer_id: Optional[str] = None,
     status: Optional[str] = None,
-    issue_type: Optional[str] = None,
+    issue_type: Optional[str | list[str]] = None,
     linked_product_batch: Optional[str] = None,
 ) -> list[Ticket]:
     query = "SELECT * FROM tickets WHERE 1=1"
@@ -266,8 +266,10 @@ def list_tickets(
         query += " AND status = ?"
         params.append(status if isinstance(status, str) else status.value)
     if issue_type is not None:
-        query += " AND issue_type = ?"
-        params.append(issue_type if isinstance(issue_type, str) else issue_type.value)
+        issue_types = [issue_type] if isinstance(issue_type, str) else list(issue_type)
+        issue_type_values = [t if isinstance(t, str) else t.value for t in issue_types]
+        query += f" AND issue_type IN ({', '.join('?' for _ in issue_type_values)})"
+        params.extend(issue_type_values)
     if linked_product_batch is not None:
         query += " AND linked_product_batch = ?"
         params.append(linked_product_batch)
