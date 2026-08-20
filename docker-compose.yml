@@ -19,6 +19,12 @@ services:
       - "8002:8000"
     env_file:
       - .env
+    environment:
+      - SOCIAL_NETWORK_BASE_URL=http://social-network:3000
+    volumes:
+      - ./docs:/app/docs:ro
+    depends_on:
+      - social-network
 
   customer-support-api:
     build: ./Customer_Support_System
