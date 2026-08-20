@@ -3,9 +3,10 @@ from dataclasses import dataclass
 from typing import List, Dict, Any
 import re
 
-from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from base.agent_base import AgentBase
 from services.llm_client import LlmClient
+from services.memory_store import MemoryRecord, MemoryStore
 from services.tool_executor import ToolExecutor
 
 
@@ -80,6 +81,37 @@ company_information = ("This some information about the company : Product -> Can
                   "--Purpose : Monitor organizations, investigate complaints, enforce regulations.")
 
 
+# The internal chat (services/internal_messaging in the separate
+# bitrix-internal-actors project) has no roster-lookup tool, so this is the only
+# way the CEO can know who is actually reachable there. Not every title a real
+# company would have exists as an agent yet -- addressing, adding, or waiting on
+# anyone outside this list (e.g. "Legal", "Head of Quality", "Quality Lab") reaches
+# nobody, because no such id is registered. Sourced from that project's
+# services/internal_messaging/integration/identity.py and services/employee/personas/.
+CHAT_ROSTER = (
+    "KNOWN INTERNAL CHAT ROSTER -- the only agents actually reachable via the chat "
+    "tools (id -- role): "
+    "COO-1 -- COO. Registered, but no COO agent currently runs; messages to COO-1 "
+    "will not get a reply yet. "
+    "EMP-QA-17 (Dana) -- Quality Control Employee: certified food-safety inspector; "
+    "reports and escalates suspected contamination. The real contact for "
+    "quality/lab-testing questions -- there is no separate 'Quality Lab' agent. "
+    "PLANT-MGR-1 (Priya) -- Plant Manager: coordinates the production floor, can "
+    "reassign or pause floor work, escalates risks beyond her authority; cannot "
+    "order a recall or overrule a safety decision. The real contact for "
+    "operational/production-floor questions. "
+    "PROD-WORKER-3 (Marco) -- Production Line Worker: reports operational issues on "
+    "Line 4. "
+    "CONCERNED-EMP-1 (Sam) -- Line Employee: vocal internally about safety and "
+    "reputation concerns. "
+    "WHISTLEBLOWER-1 (Alex) -- Line Employee: escalates internally first, but will "
+    "leak externally if a genuine public-safety hazard looks covered up. "
+    "COORD-1 -- a system/coordinator identity, not a person to message. "
+    "There is no Legal, Board, or Head of Quality agent in the chat at all -- do "
+    "not address, add as a member, or wait on a reply from any id or title not in "
+    "this list."
+)
+
 
 # =====================================================================
 # STEP 1: PROMPT GENERATORS (Helper Functions)
@@ -96,13 +128,40 @@ def _parse_json(text: str) -> dict | None:
     except json.decoder.JSONDecodeError:
         return None
 
-def _build_planner_prompt(tool_schemas: List[Dict[str, Any]], user_event: str) -> str:
+def _format_past_memories(past_memories: List[MemoryRecord]) -> str:
+    """Renders recalled memory records for the planner prompt.
+
+    Kept to event + final decision: the plan and step-by-step outcomes of a
+    past run are recall detail, not something the new plan should copy
+    verbatim.
+    """
+    if not past_memories:
+        return "None."
+
+    return "\n".join(
+        f"{i}. Event: {m.event}\n   Outcome: {m.final_summary}"
+        for i, m in enumerate(past_memories, start=1)
+    )
+
+
+def _build_planner_prompt(
+        tool_schemas: List[Dict[str, Any]],
+        user_event: str,
+        past_memories: List[MemoryRecord] | None = None,
+) -> str:
     """Generates the initial plan for the CEO agent."""
     tools_summary = "\n".join([f"- {s['name']}: {s['description']}" for s in tool_schemas])
 
     return f"""You are a CEO Agent in Food Manufacturing Company Named **HappyTuna**. managing corporate operations.
-This information about the company and his agnet and roles: "{company_information}"     
+This information about the company and his agnet and roles: "{company_information}"
+
+{CHAT_ROSTER}
+
 A major event/problem has occurred: "{user_event}"
+
+RELEVANT PAST EVENTS (from long-term memory, most similar first -- use them to
+inform this plan where relevant, but this is a new event with its own plan):
+{_format_past_memories(past_memories or [])}
 
 Available Tools & Sub-Agents:
 {tools_summary}
@@ -253,11 +312,18 @@ class StepOutcome:
 def _build_executor_prompt(
         tool_schemas: List[Dict[str, Any]],
         overall_event: str,
-        plan: List[str],
-        current_step_idx: int,
+        remaining_plan: List[str],
+        step_number: int,
         previous_results: List[Dict[str, Any]]
 ) -> str:
-    """Focuses the LLM purely on executing ONE specific step of the plan."""
+    """Focuses the LLM purely on executing ONE specific step of the plan.
+
+    Tool argument schemas are bound natively (see _build_tool_defs /
+    LlmClient.invoke_with_tools), so the model calls a real tool rather than
+    hand-writing a JSON action for us to parse back out of text. The prose
+    listing below stays only as human-readable context for choosing between
+    tools, not as the contract for how to respond.
+    """
     tools_section = ""
     for s in tool_schemas:
         props = s["parameters"].get("properties", {})
@@ -283,18 +349,17 @@ def _build_executor_prompt(
     return f"""You are the CEO Agent executing a plan.
 
 OVERALL EVENT: {overall_event}
-CURRENT PLAN: {json.dumps(plan, indent=2)}
+CURRENT + UPCOMING STEPS (steps after this one may still be revised once this
+one's outcome is known): {json.dumps(remaining_plan, indent=2)}
 
 PROGRESS SO FAR (the outcomes below include the real data each tool returned):
 {formatted_history}
 
-CURRENT TASK TO COMPLETE NOW: Step {current_step_idx + 1}: "{plan[current_step_idx]}"
+CURRENT TASK TO COMPLETE NOW: Step {step_number}: "{remaining_plan[0]}"
 
-RESPONSE FORMAT — follow exactly:
-- To call a tool/sub-agent for this step, output:
-  {{"action": "tool_name", "args": {{"arg_name": "value"}}}}
-- If this step needs no tool call, output:
-  {{"action": "step_complete", "result": "Summary of step execution outcome"}}
+Call exactly one tool to make progress on this step. If this step needs no
+tool call, call the "step_complete" tool with a `result` summarizing what was
+done.
 
 USING IDS AND OTHER VALUES — this is not optional:
 - Every id, channel id, ticket id, post id, email address, and username you pass
@@ -305,11 +370,140 @@ USING IDS AND OTHER VALUES — this is not optional:
 - If the id you need does not appear in any previous result, call the tool that
   lists or looks it up first, and use the id it returns.
 
+CHAT MEMBERSHIP VS. ADDRESSING -- these are not the same thing:
+- Naming someone in chat.send_message's `to` field does NOT add them to the
+  channel. `to` only labels the message; a non-member cannot see it no matter
+  how many times you name them there.
+- Every chat.send_message result includes `delivered_to` -- the channel's
+  real membership. If someone you named in `to` is missing from
+  `delivered_to`, they never received the message.
+- Before messaging someone for the first time in a channel, call
+  chat.add_member to actually add them. Do this once per person, not once
+  per message -- repeating their name in `to` will not fix a missing member.
+
+{CHAT_ROSTER}
+
+DO NOT WAIT INDEFINITELY FOR A REPLY:
+- COO-1 has no agent running yet (see roster above) and will never reply during
+  this session. Other personas may or may not be online -- sending a message is
+  not a guarantee anyone will answer it.
+- If you have already sent a message in a channel and checked it once since
+  then with no new reply, do not send another follow-up or re-check again for
+  that same request. Proceed using your own authority and the best information
+  you currently have.
+- As CEO, you hold final decision authority. Do not let a pending internal
+  reply block a public statement, a recall decision, or any other action that
+  has its own deadline or urgency.
+
+OWN THE TOOLS ONLY YOU HAVE:
+- social.create_post and social.add_comment can only be called by you -- no other
+  agent in this simulation, real or simulated, has access to them. Sending a chat
+  message asking someone else to "publish," "post," or "issue" a public statement
+  does not publish it; nobody on the other end can call that tool.
+- If a step calls for a public statement, press release, or any other action only
+  your own tools can perform, call that tool yourself in this step. Do not write or
+  execute a step that asks another agent to do it, and do not treat the step as
+  complete until you have actually called the tool.
+
 One successful tool call completes this step; the plan's next step continues the
 work, and the result of this call will be available to it.
 
 Available Tools:
 {tools_section}"""
+
+
+STEP_COMPLETE_TOOL: Dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "step_complete",
+        "description": "Call this when the current step needs no tool call to finish it.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "result": {
+                    "type": "string",
+                    "description": "Summary of the step's outcome.",
+                },
+            },
+            "required": ["result"],
+        },
+    },
+}
+
+
+def _build_tool_defs(tool_schemas: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Converts registered tool schemas into OpenAI-format function defs for
+    native tool calling (langchain_google_genai's bind_tools accepts these
+    and forwards them to Gemini's function-calling API), plus the synthetic
+    step_complete signal the executor loop watches for.
+    """
+    defs = [
+        {
+            "type": "function",
+            "function": {
+                "name": s["name"],
+                "description": s["description"],
+                "parameters": s["parameters"],
+            },
+        }
+        for s in tool_schemas
+    ]
+    defs.append(STEP_COMPLETE_TOOL)
+    return defs
+
+
+def _build_replanner_prompt(
+        overall_event: str,
+        completed_results: List[Dict[str, Any]],
+        remaining_plan: List[str],
+        max_plan_steps: int,
+) -> str:
+    """Asks the CEO to revise the still-to-run steps in light of what
+    execution has actually found, instead of running the rest of a plan that
+    was written blind before any tool had been touched.
+    """
+    formatted_history = "\n".join([
+        f"- Step {r['step']} [{'completed' if r['completed'] else 'did not complete'}]: "
+        f"{r['task']} --> Outcome: {r['result']}"
+        for r in completed_results
+    ]) if completed_results else "None"
+
+    return f"""You are the CEO Agent, reviewing progress partway through a plan for
+the event: "{overall_event}"
+
+STEPS COMPLETED SO FAR (with their real outcomes):
+{formatted_history}
+
+REMAINING PLANNED STEPS (written before the outcomes above were known):
+{json.dumps(remaining_plan, indent=2)}
+
+Given what has actually happened, decide how to continue:
+- If the remaining steps are still the right next actions, return them unchanged.
+- If a step is now unnecessary, redundant, or rests on an assumption the outcomes
+  above already contradict, drop or replace it.
+- If the outcomes above reveal new work that should happen before continuing,
+  insert it.
+- If the completed steps already show you checked a channel for a reply and found
+  nothing new, do not add another "wait", "check again", or "follow up" step for
+  that same request. Drop it and move the plan forward on your own judgment --
+  colleagues in this simulation may never reply.
+- Never revise a step that calls for publishing a public statement (or any other
+  CEO-only action) into an instruction routed through another agent. Only you can
+  call social.create_post/social.add_comment -- keep that step as your own direct
+  tool call.
+- If the event is already fully handled and no further steps are needed, return
+  an empty plan and set "done" to true.
+
+Keep the remaining plan concise (maximum {max_plan_steps} steps).
+
+RESPONSE FORMAT (JSON ONLY):
+{{
+  "done": false,
+  "plan": [
+    "Next step to take",
+    "Following step"
+  ]
+}}"""
 
 
 # =====================================================================
@@ -320,6 +514,10 @@ Available Tools:
 class CeoConfig:
     max_tool_retries_per_step: int = 6
     max_plan_steps: int = 15
+    # Overall step budget for one chat() run, across the initial plan AND every
+    # step added by replanning. Without this, a replanner that keeps inserting
+    # "just one more thing" has no natural stopping point.
+    max_total_steps: int = 20
 
 
 class CeoAgent(AgentBase):
@@ -328,10 +526,14 @@ class CeoAgent(AgentBase):
             llm_client: LlmClient,
             executor: ToolExecutor,
             config: CeoConfig = CeoConfig(),
+            memory_store: MemoryStore | None = None,
+            memory_recall_top_k: int = 3,
     ) -> None:
         self._llm = llm_client
         self._executor = executor
         self._config = config
+        self._memory = memory_store
+        self._memory_recall_top_k = memory_recall_top_k
 
     def chat(self, user_input: str) -> str:
         self._executor.clear_traces()
@@ -342,7 +544,17 @@ class CeoAgent(AgentBase):
         # ==========================================
         self._executor.log_trace(0, "PLAN", None, "CEO generating initial plan...")
 
-        planner_prompt = _build_planner_prompt(tool_schemas, user_input)
+        past_memories = (
+            self._memory.recall(user_input, top_k=self._memory_recall_top_k)
+            if self._memory else []
+        )
+        if past_memories:
+            self._executor.log_trace(
+                0, "MEMORY_RECALL", None,
+                f"Recalled {len(past_memories)} similar past event(s)."
+            )
+
+        planner_prompt = _build_planner_prompt(tool_schemas, user_input, past_memories)
         raw_plan = self._llm.invoke([HumanMessage(content=planner_prompt)])
         parsed_plan = _parse_json(raw_plan)
 
@@ -353,26 +565,35 @@ class CeoAgent(AgentBase):
         self._executor.log_trace(0, "PLAN", None, f"Generated Plan: {json.dumps(plan)}")
 
         # ==========================================
-        # PHASE 2: EXECUTION LOOP
+        # PHASE 2: EXECUTION LOOP, WITH REPLANNING
         # ==========================================
+        # The plan is a queue of remaining steps, not a fixed array: after
+        # each step, the CEO reviews it against what actually happened and
+        # may revise, extend, or end it early. A plan written before any tool
+        # had been touched should not keep running unmodified once it's been
+        # contradicted by real results.
         previous_results: List[Dict[str, Any]] = []
+        step_number = 0
 
-        for step_idx, step_task in enumerate(plan):
+        while plan and step_number < self._config.max_total_steps:
+            step_number += 1
+            step_task = plan[0]
+
             self._executor.log_trace(
-                step_idx + 1, "EXECUTE_STEP", None, f"Starting Step {step_idx + 1}: {step_task}"
+                step_number, "EXECUTE_STEP", None, f"Starting Step {step_number}: {step_task}"
             )
 
             # Execute step with retries for tool calls
             step_outcome = self._execute_single_step(
                 user_event=user_input,
-                plan=plan,
-                current_step_idx=step_idx,
+                remaining_plan=plan,
+                step_number=step_number,
                 previous_results=previous_results,
                 tool_schemas=tool_schemas,
             )
 
             previous_results.append({
-                "step": step_idx + 1,
+                "step": step_number,
                 "task": step_task,
                 "completed": step_outcome.completed,
                 "result": step_outcome.summary,
@@ -381,11 +602,36 @@ class CeoAgent(AgentBase):
             # The phase reports what happened, so a step that never finished is
             # not logged as STEP_COMPLETE.
             self._executor.log_trace(
-                step_idx + 1,
+                step_number,
                 "STEP_COMPLETE" if step_outcome.completed else "STEP_INCOMPLETE",
                 None,
                 f"Outcome: {step_outcome.summary}",
             )
+
+            plan = plan[1:]
+            if not plan:
+                break
+
+            replan_result = self._replan(user_input, previous_results, plan)
+            if replan_result is None:
+                self._executor.log_trace(
+                    step_number, "REPLAN", None,
+                    "Replanner reply unparseable; continuing with the existing remaining plan.",
+                )
+                continue
+
+            new_plan = replan_result.get("plan") or []
+            if replan_result.get("done") or not new_plan:
+                self._executor.log_trace(
+                    step_number, "REPLAN", None,
+                    "CEO determined the event is fully handled; ending the plan early.",
+                )
+                plan = []
+            else:
+                plan = new_plan[:self._config.max_plan_steps]
+                self._executor.log_trace(
+                    step_number, "REPLAN", None, f"Revised remaining plan: {json.dumps(plan)}"
+                )
 
         # ==========================================
         # PHASE 3: FINAL CEO DECISION / SUMMARY
@@ -405,66 +651,88 @@ only where a step is marked not completed, and say which step and why.
 Provide a final decision/summary report to the board and other team agents."""
 
         final_response = self._llm.invoke([HumanMessage(content=summary_prompt)])
+
+        if self._memory:
+            self._memory.remember(MemoryRecord(
+                event=user_input,
+                plan=plan,
+                step_results=previous_results,
+                final_summary=final_response,
+            ))
+
         return final_response
 
     def _execute_single_step(
             self,
             user_event: str,
-            plan: List[str],
-            current_step_idx: int,
+            remaining_plan: List[str],
+            step_number: int,
             previous_results: List[Dict[str, Any]],
             tool_schemas: List[Dict[str, Any]]
     ) -> StepOutcome:
         """Sub-loop to handle tool calls for a single step in the plan.
 
+        Uses native function calling (LlmClient.invoke_with_tools) rather than
+        asking the model to hand-write a JSON action and regex-parsing it back
+        out of text: the provider enforces each tool's argument schema itself,
+        so there is no "invalid JSON" failure mode to retry around here.
+
         Two different things can go wrong here and they are not the same thing:
-        the tool call can fail, or the model can fail to end the loop with a
-        step_complete action. Only the first is a failed step. A step whose tool
-        call came back OK is done -- reporting it as "maximum retries exceeded"
-        put a successful call, and the data it returned, into the record as a
+        the tool call can fail, or the model can fail to make any tool call at
+        all. Only the first is a failed step. A step whose tool call came back
+        OK is done -- reporting it as "maximum retries exceeded" put a
+        successful call, and the data it returned, into the record as a
         failure. Where the loop really does run out of attempts, the outcome
         names what actually stopped it.
         """
 
         exec_system_prompt = _build_executor_prompt(
-            tool_schemas, user_event, plan, current_step_idx, previous_results
+            tool_schemas, user_event, remaining_plan, step_number, previous_results
         )
-        step_task = plan[current_step_idx]
-        step_label = f'Step {current_step_idx + 1} ("{step_task}")'
+        step_task = remaining_plan[0]
+        step_label = f'Step {step_number} ("{step_task}")'
 
         # The SystemMessage carries the tools and context, but Gemini puts it in
         # `system_instruction` -- it never lands in `contents`. Without a user
         # turn alongside it the request is empty. See _require_sendable_messages.
-        step_messages = [
+        step_messages: List[Any] = [
             SystemMessage(content=exec_system_prompt),
             HumanMessage(
-                content=f'Execute step {current_step_idx + 1}: "{step_task}"\n'
-                        f"Respond with a single JSON object in the format specified above."
+                content=f'Execute step {step_number}: "{step_task}"\n'
+                        f"Call exactly one tool to make progress on this step."
             ),
         ]
 
+        tool_defs = _build_tool_defs(tool_schemas)
         attempts = self._config.max_tool_retries_per_step
         tool_errors: List[str] = []
         unusable_replies = 0
 
         for _ in range(attempts):
             _require_sendable_messages(step_messages, step_label)
-            raw = self._llm.invoke(step_messages)
-            step_messages.append(AIMessage(content=raw))
+            ai_msg = self._llm.invoke_with_tools(step_messages, tool_defs)
+            step_messages.append(ai_msg)
 
-            parsed = _parse_json(raw)
-            if not parsed:
+            tool_calls = getattr(ai_msg, "tool_calls", None) or []
+            if not tool_calls:
                 unusable_replies += 1
-                step_messages.append(
-                    HumanMessage(content="Invalid JSON format. Respond with a valid single JSON object.")
-                )
+                step_messages.append(HumanMessage(
+                    content='You must call exactly one tool -- use "step_complete" if '
+                            "this step needs no action."
+                ))
                 continue
 
-            action = parsed.get("action", "")
+            # One tool call per attempt, same as the previous hand-rolled
+            # protocol; a model that returns several is only honored for the
+            # first, and the rest are simply not acted on this attempt.
+            call = tool_calls[0]
+            tool_name = call["name"]
+            args = call.get("args") or {}
+            call_id = call.get("id")
 
-            # If LLM finishes the current step without needing a tool:
-            if action == "step_complete":
-                summary = str(parsed.get("result", "Step finished."))
+            # If LLM finishes the current step without needing a real tool:
+            if tool_name == "step_complete":
+                summary = str(args.get("result", "Step finished."))
                 if tool_errors:
                     summary += (
                         f" (No tool call succeeded during this step; "
@@ -472,18 +740,8 @@ Provide a final decision/summary report to the board and other team agents."""
                     )
                 return StepOutcome(completed=True, summary=summary)
 
-            if not action:
-                unusable_replies += 1
-                step_messages.append(HumanMessage(
-                    content='The JSON had no "action". Respond with either a tool call '
-                            'or {"action": "step_complete", "result": "..."}.'
-                ))
-                continue
-
             # Execute tool call for this step
-            tool_name = action
-            args = parsed.get("args", {})
-            result = self._executor.execute(current_step_idx + 1, tool_name, args)
+            result = self._executor.execute(step_number, tool_name, args)
 
             # A call that came back OK is the step's work, done. Returning here
             # carries the returned data into the record instead of leaving it to
@@ -500,14 +758,33 @@ Provide a final decision/summary report to the board and other team agents."""
                 )
 
             tool_errors.append(f"{tool_name}: {result.error}")
+            # A pending tool_call in the AIMessage above needs a matching
+            # ToolMessage before the next turn, or the provider rejects the
+            # conversation as having an unanswered function call.
             step_messages.append(
-                HumanMessage(content=f"Tool '{tool_name}' failed: {result.error}")
+                ToolMessage(content=f"Tool '{tool_name}' failed: {result.error}", tool_call_id=call_id)
             )
 
         return StepOutcome(
             completed=False,
             summary=_describe_exhausted_step(attempts, tool_errors, unusable_replies),
         )
+
+    def _replan(
+            self,
+            user_input: str,
+            previous_results: List[Dict[str, Any]],
+            remaining_plan: List[str],
+    ) -> Dict[str, Any] | None:
+        """Reviews progress against the still-to-run steps and returns the CEO's
+        revised plan, or None if the reply could not be parsed (the caller
+        falls back to keeping the existing remaining plan).
+        """
+        prompt = _build_replanner_prompt(
+            user_input, previous_results, remaining_plan, self._config.max_plan_steps
+        )
+        raw = self._llm.invoke([HumanMessage(content=prompt)])
+        return _parse_json(raw)
 
     def reset(self) -> None:
         self._executor.clear_traces()
