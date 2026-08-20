@@ -35,7 +35,9 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
 from agents.CEO_Agent import CeoAgent, CeoConfig
 from gateway.catalog import TOOL_ACCESS
 from gateway_bridge import setup_gateway_tools, teardown_gateway_tools
+from services.embedding_service import EmbeddingConfig, EmbeddingService
 from services.llm_client import LlmClient, LlmConfig
+from services.memory_store import MemoryConfig, MemoryStore
 from services.tool_executor import ToolExecutor
 
 load_dotenv()
@@ -54,9 +56,16 @@ GATEWAY_DRY_RUN = False
 LLM_API_KEY = os.getenv("GEMINI_API_KEY")
 LLM_MODEL_NAME = os.getenv("GEMINI_MODEL_NAME", "gemini-2.0-flash")
 LLM_TEMPERATURE = float(os.getenv("GEMINI_TEMPERATURE", "0.7"))
+EMBEDDING_MODEL_NAME = os.getenv("GEMINI_EMBEDDING_MODEL", "models/text-embedding-004")
 
-MAX_PLAN_STEPS = 13
-MAX_TOOL_RETRIES_PER_STEP = 7
+# The CEO's long-term memory of past events/decisions, recalled at the start of
+# each run and written back at the end. Set to False to run stateless, e.g. for
+# a one-off scenario that shouldn't pollute recall for later runs.
+ENABLE_LONG_TERM_MEMORY = True
+MEMORY_RECALL_TOP_K = 3
+
+MAX_PLAN_STEPS = 15
+MAX_TOOL_RETRIES_PER_STEP = 6
 
 # A situation, not an order: no tool is named and no action is requested, so
 # whatever the CEO reaches for is its own choice. The details match the
@@ -113,10 +122,23 @@ def main() -> None:
     except Exception as exc:
         print(f"=== Gateway unavailable, continuing with no tools: {exc} ===\n")
 
+    # Long-term memory is never fatal either: a bad embedding key shouldn't
+    # stop the CEO from handling the event, just from remembering it.
+    memory_store = None
+    if ENABLE_LONG_TERM_MEMORY:
+        try:
+            embeddings = EmbeddingService(EmbeddingConfig(
+                api_key=LLM_API_KEY,
+                model_name=EMBEDDING_MODEL_NAME,
+            ))
+            memory_store = MemoryStore(embeddings, MemoryConfig())
+        except Exception as exc:
+            print(f"=== Long-term memory unavailable, continuing without it: {exc} ===\n")
+    
     ceo = CeoAgent(llm, executor, CeoConfig(
         max_plan_steps=MAX_PLAN_STEPS,
         max_tool_retries_per_step=MAX_TOOL_RETRIES_PER_STEP,
-    ))
+    ), memory_store=memory_store, memory_recall_top_k=MEMORY_RECALL_TOP_K)
 
     # --- 2) Run the plan-solve loop
     try:
