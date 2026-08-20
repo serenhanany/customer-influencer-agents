@@ -184,16 +184,22 @@ def _schema_type(prop: Dict[str, Any]) -> str:
 
     Optional parameters carry no top-level "type" -- they're an anyOf over the
     real type and "null" (e.g. support.patch_ticket's `status`), so indexing
-    ["type"] raises KeyError on every tool that has one. Read the first
-    non-null branch instead.
+    ["type"] raises KeyError on every tool that has one. Read every non-null
+    branch instead of just the first: a param like support.list_tickets'
+    `issue_type` (str or list[str]) is genuinely two usable shapes, and
+    naming only "string" hides the array option from the prose description
+    even though the real bound schema (used for the actual tool call, see
+    _build_tool_defs) still allows it.
     """
     if "type" in prop:
         return prop["type"]
 
-    for branch in prop.get("anyOf", []):
-        branch_type = branch.get("type")
-        if branch_type and branch_type != "null":
-            return branch_type
+    branch_types = [
+        branch["type"] for branch in prop.get("anyOf", [])
+        if branch.get("type") and branch["type"] != "null"
+    ]
+    if branch_types:
+        return " or ".join(dict.fromkeys(branch_types))
 
     return "string"
 
